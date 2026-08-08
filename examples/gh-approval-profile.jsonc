@@ -1,0 +1,72 @@
+{
+  "meta": {
+    "name": "gh-approval-profile",
+    "version": "0.2.0",
+    "description": "Composable overlay that gates direct gh invocations through nono-hitl"
+  },
+  "command_policies": {
+    "approval_backends": {
+      "nono-hitl": {
+        "type": "webhook",
+        "url": "http://127.0.0.1:8765/hooks/nono",
+        "timeout_secs": 60
+      }
+    },
+    "approval_defaults": {
+      "backend": "nono-hitl",
+      "timeout_secs": 60
+    },
+    "commands": {
+      "gh": {
+        "from": {
+          "session": {
+            "sandbox": {
+              "fs_read": ["$XDG_CONFIG_HOME/gh"],
+              "network": {
+                "allow_domain": ["api.github.com"]
+              },
+              "environment": {
+                "allow_vars": [
+                  "PATH",
+                  "HOME",
+                  "USER",
+                  "LOGNAME",
+                  "SHELL",
+                  "TERM",
+                  "COLORTERM",
+                  "LANG",
+                  "LC_*",
+                  "TZ",
+                  "HTTPS_PROXY",
+                  "HTTP_PROXY",
+                  "NO_PROXY",
+                  "https_proxy",
+                  "http_proxy",
+                  "no_proxy",
+                  "SSL_CERT_FILE",
+                  "CURL_CA_BUNDLE",
+                  "GIT_SSL_CAINFO",
+                  "GH_HOST",
+                  "GH_REPO",
+                  "GH_TOKEN"
+                ],
+                "set_vars": {
+                  "GH_CONFIG_DIR": "$XDG_CONFIG_HOME/gh",
+                  "GH_PROMPT_DISABLED": "1",
+                  "GH_PAGER": "cat"
+                }
+              }
+            },
+            "invocation_policy": {
+              "default": {
+                "decision": "approve",
+                "backend": "nono-hitl",
+                "timeout_secs": 60
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

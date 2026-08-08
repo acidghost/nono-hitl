@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="description" content="Local command approval dashboard for nono">
+    <title>nono approvals</title>
+    <link rel="stylesheet" href="/assets/style.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#pending">Skip to pending approvals</a>
+
+    <header class="site-header">
+      <div>
+        <p class="eyebrow">LOCAL APPROVAL SERVICE</p>
+        <h1>nono<span aria-hidden="true">/</span>hitl</h1>
+      </div>
+      <div class="header-actions">
+        <p id="connection-status" class="connection" role="status" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span class="connection-label">Connecting</span>
+        </p>
+        <button id="notifications-button" class="button button-quiet" type="button">
+          Enable notifications
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <div id="action-status" class="visually-hidden" role="status" aria-live="assertive"></div>
+
+      <section id="pending" class="approval-section" aria-labelledby="pending-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Requires attention</p>
+            <h2 id="pending-heading">
+              Pending approvals <span id="pending-count" class="count">0</span>
+            </h2>
+          </div>
+          <p class="section-help">Deny is shown first as the safer action.</p>
+        </div>
+        <div id="pending-list" class="card-list"></div>
+        <div id="pending-empty" class="empty-state">
+          <span class="empty-mark" aria-hidden="true">✓</span>
+          <div>
+            <h3>No commands are waiting</h3>
+            <p>New <code>gh</code> requests will appear here.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="approval-section recent-section" aria-labelledby="recent-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">In-memory only</p>
+            <h2 id="recent-heading">Recently resolved</h2>
+          </div>
+          <p class="section-help">History is bounded and cleared when the service stops.</p>
+        </div>
+        <div id="recent-list" class="card-list card-list-compact"></div>
+        <p id="recent-empty" class="empty-copy">No recent decisions.</p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Listening only on <code>127.0.0.1</code>. Approval releases the preconfigured child sandbox;
+        it does not add capabilities.
+      </p>
+    </footer>
+  </body>
+</html>
