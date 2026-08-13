@@ -4,5 +4,11 @@
     "local>acidghost/renovate-config",
     "local>acidghost/renovate-config:approve(patch)",
     "customManagers:biomeVersions"
+  ],
+  "packageRules": [
+    {
+      "matchDepNames": ["aqua:biomejs/biome"],
+      "extractVersion": "@biomejs/biome@(?<version>.+)"
+    }
   ]
 }
