@@ -3,13 +3,6 @@
   "extends": [
     "local>acidghost/renovate-config",
     "local>acidghost/renovate-config:approve(patch)",
-    "customManagers:biomeVersions"
-  ],
-  "packageRules": [
-    {
-      "matchDepNames": ["biome"],
-      "matchManagers": ["mise"],
-      "extractVersion": "@biomejs/biome@(?<version>.+)"
-    }
+    "local>acidghost/renovate-config:mise-biome"
   ]
 }
