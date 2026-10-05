@@ -1,8 +1,25 @@
 {
+  "$schema": "https://github.com/nolabs-ai/nono/raw/refs/heads/main/crates/nono-cli/data/nono-profile.schema.json",
   "meta": {
-    "name": "gh-approval-profile",
-    "version": "0.2.0",
-    "description": "Composable overlay that gates direct gh invocations through nono-hitl"
+    "name": "gh-approval"
+  },
+  "environment": {
+    "deny_vars": [
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "GH_ENTERPRISE_TOKEN"
+    ]
+  },
+  "credential_capture": {
+    "github": {
+      "command": [
+        "gh",
+        "auth",
+        "token"
+      ],
+      "timeout_secs": 15,
+      "cache_ttl_secs": 900
+    }
   },
   "command_policies": {
     "approval_backends": {
@@ -18,12 +35,20 @@
     },
     "commands": {
       "gh": {
+        "can_use": [
+          "git"
+        ],
         "from": {
           "session": {
             "sandbox": {
-              "fs_read": ["$XDG_CONFIG_HOME/gh"],
+              "fs_read": [
+                ".",
+                "$XDG_CONFIG_HOME/gh"
+              ],
               "network": {
-                "allow_domain": ["api.github.com"]
+                "allow_domain": [
+                  "api.github.com"
+                ]
               },
               "environment": {
                 "allow_vars": [
@@ -46,27 +71,88 @@
                   "SSL_CERT_FILE",
                   "CURL_CA_BUNDLE",
                   "GIT_SSL_CAINFO",
-                  "GH_HOST",
-                  "GH_REPO",
-                  "GH_TOKEN"
+                  "GH_REPO"
                 ],
                 "set_vars": {
                   "GH_CONFIG_DIR": "$XDG_CONFIG_HOME/gh",
                   "GH_PROMPT_DISABLED": "1",
-                  "GH_PAGER": "cat"
+                  "GH_PAGER": "cat",
+                  "GH_HOST": "github.com",
+                  "GH_NO_UPDATE_NOTIFIER": "1",
+                  "GH_NO_EXTENSION_UPDATE_NOTIFIER": "1"
                 }
-              }
+              },
+              "credentials": [
+                {
+                  "name": "github-write",
+                  "endpoint_policy": {
+                    "default": "allow"
+                  }
+                }
+              ]
             },
             "invocation_policy": {
-              "default": {
-                "decision": "approve",
-                "backend": "nono-hitl",
-                "timeout_secs": 60
-              }
+              "default": "approve",
+              // biome-ignore format: keep each allow item on a single line
+              "allow": [
+                { "argv": { "prefix": ["issue", "list"] } },
+                { "argv": { "prefix": ["issue", "view"] } },
+                { "argv": { "prefix": ["pr", "list"] } },
+                { "argv": { "prefix": ["pr", "view"] } },
+                { "argv": { "prefix": ["pr", "diff"] } },
+                { "argv": { "prefix": ["pr", "checks"] } },
+                { "argv": { "prefix": ["repo", "view"] } },
+                { "argv": { "prefix": ["release", "list"] } },
+                { "argv": { "prefix": ["release", "view"] } },
+                { "argv": { "prefix": ["run", "list"] } },
+                { "argv": { "prefix": ["run", "view"] } },
+                { "argv": { "prefix": ["workflow", "list"] } },
+                { "argv": { "prefix": ["workflow", "view"] } }
+              ]
+            }
+          }
+        }
+      },
+      "git": {
+        "from": {
+          "gh": {
+            "sandbox": {
+              "fs_read": [
+                ".",
+                "@git:common-dir",
+                "@git:toplevel",
+                "/opt/homebrew"
+              ],
+              "fs_read_file": [
+                "@git:config-files"
+              ]
+            },
+            "invocation_policy": {
+              "default": "deny",
+              // biome-ignore format: keep each allow item on a single line
+              "allow": [
+                { "argv": { "prefix": ["rev-parse"] } },
+                { "argv": { "exact": ["remote", "-v"] } },
+                { "argv": { "exact": ["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"] } }
+              ]
             }
           }
         }
       }
+    },
+    "credentials": {
+      "github-write": {
+        "type": "proxy",
+        "upstream": "https://api.github.com",
+        "credential_key": "cmd://github",
+        "env_var": "GH_TOKEN",
+        "credential_format": "token {}"
+      }
+    }
+  },
+  "network": {
+    "tls_intercept": {
+      "ca_lifecycle": "trusted"
     }
   }
 }
