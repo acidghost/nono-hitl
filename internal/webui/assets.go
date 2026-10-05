@@ -15,6 +15,9 @@ var (
 
 	//go:embed style.css
 	styleCSS []byte
+
+	//go:embed logo.svg
+	logoSVG []byte
 )
 
 // Handler serves the fixed set of embedded dashboard assets.
@@ -27,6 +30,8 @@ func Handler() http.Handler {
 			serveAsset(writer, "text/javascript; charset=utf-8", appJS)
 		case "/assets/style.css":
 			serveAsset(writer, "text/css; charset=utf-8", styleCSS)
+		case "/assets/logo.svg":
+			serveAsset(writer, "image/svg+xml", logoSVG)
 		default:
 			http.NotFound(writer, request)
 		}

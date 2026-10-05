@@ -38,6 +38,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /{$}", ui)
 	mux.Handle("GET /assets/app.js", ui)
 	mux.Handle("GET /assets/style.css", ui)
+	mux.Handle("GET /assets/logo.svg", ui)
 	mux.HandleFunc("POST /hooks/nono", s.handleWebhook)
 	mux.HandleFunc("GET /api/v1/approvals", s.handleSnapshot)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
@@ -218,7 +219,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		header := writer.Header()
 		header.Set(
 			"Content-Security-Policy",
-			"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'",
+			"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'",
 		)
 		header.Set("Referrer-Policy", "no-referrer")
 		header.Set("X-Content-Type-Options", "nosniff")

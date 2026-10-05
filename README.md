@@ -1,5 +1,7 @@
 # nono-hitl
 
+<img src="internal/webui/logo.svg" alt="nono-hitl logo" width="96" height="96">
+
 `nono-hitl` is a local human-approval backend for
 [nono](https://github.com/nolabs-ai/nono) command policies. It receives
 synchronous webhook requests from nono, shows them in a browser outside the

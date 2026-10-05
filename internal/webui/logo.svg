@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+	<title id="title">Perspective stamp — a three-quarter view with a solid base</title>
+	<rect width="64" height="64" rx="12" fill="#0b0d10" />
+	<path d="m10 39 12 8v8l-12-8Z" fill="#319e7c" />
+	<path d="m22 47 32-8v8l-32 8Z" fill="#4dbb95" />
+	<path d="m10 39 32-8 12 8-32 8Z" fill="#76e6bd" />
+	<path d="M28 20h8v15q-4 4-8 0Z" fill="#4dbb95" />
+	<path d="M22 16h20v5c0 4-5 7-10 7s-10-3-10-7Z" fill="#76e6bd" />
+	<ellipse cx="32" cy="16" rx="10" ry="6" fill="#b3f5dc" />
+</svg>
