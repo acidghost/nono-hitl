@@ -70,6 +70,43 @@ nono run \
 To wrap an agent instead, replace the trailing command with `-- pi`. Keep
 `nono-hitl` running in a trusted host terminal, outside the agent sandbox.
 
+## Run at login on macOS
+
+The included LaunchAgent runs `nono-hitl serve` as your normal user, outside the
+agent sandbox. Run the installation script from a trusted host terminal after
+installing the binary and adding it to `PATH`:
+
+```sh
+./examples/install-launchagent.sh
+```
+
+The script installs `examples/nono-hitl.plist`, fills in absolute binary and log
+paths, validates it, and loads the service. If already loaded, unload it using
+the command below before running the script again.
+
+Stop any manually started instance first to free port `8765`. The LaunchAgent
+starts immediately and at login, and restarts the service if it exits. No `sudo`
+is needed. launchd requires an absolute binary path; it does not expand `~` or
+use your shell's `PATH`. If you move the binary, update the plist and reload it.
+Open <http://127.0.0.1:8765/> manually when needed.
+
+Standard output and errors are appended to separate files under
+`~/Library/Logs/nono-hitl/`. To follow both:
+
+```sh
+tail -F "$HOME/Library/Logs/nono-hitl/stdout.log" "$HOME/Library/Logs/nono-hitl/stderr.log"
+```
+
+launchd does not rotate these logs automatically.
+
+To stop and unload the service:
+
+```sh
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/nono-hitl.plist"
+```
+
+Remove that plist to prevent it from starting at future logins.
+
 ## Command-line usage
 
 ```text
