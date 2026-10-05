@@ -114,7 +114,7 @@ func TestWebhookBlocksUntilGranted(t *testing.T) {
 	t.Parallel()
 
 	service, store := newTestServer(t, nil)
-	webhookDone := submitWebhook(service, validWebhookBody(t, "req-grant", approval.SupportedCommand))
+	webhookDone := submitWebhook(service, validWebhookBody(t, "req-grant", "git"))
 	waitForPending(t, store)
 
 	snapshot := performRequest(service, http.MethodGet, "/api/v1/approvals", "", nil)
@@ -145,7 +145,7 @@ func TestWebhookDenialAndTimeoutFailClosed(t *testing.T) {
 	t.Run("denied", func(t *testing.T) {
 		t.Parallel()
 		service, store := newTestServer(t, nil)
-		webhookDone := submitWebhook(service, validWebhookBody(t, "req-deny", approval.SupportedCommand))
+		webhookDone := submitWebhook(service, validWebhookBody(t, "req-deny", "gh"))
 		waitForPending(t, store)
 
 		decision := performDecision(service, "req-deny", `{"decision":"denied","reason":"user denied"}`, service.origin)
@@ -165,7 +165,7 @@ func TestWebhookDenialAndTimeoutFailClosed(t *testing.T) {
 		service, _ := newTestServer(t, func(config *Config) {
 			config.DecisionTimeout = 20 * time.Millisecond
 		})
-		webhook := awaitHTTPResponse(t, submitWebhook(service, validWebhookBody(t, "req-expire", approval.SupportedCommand)))
+		webhook := awaitHTTPResponse(t, submitWebhook(service, validWebhookBody(t, "req-expire", "gh")))
 		var response decisionResponse
 		decodeResponse(t, webhook.Body, &response)
 		if response.Decision != "denied" || !strings.Contains(response.Reason, "timed out") {
@@ -208,8 +208,13 @@ func TestWebhookRejectsMalformedOversizedAndUnsupportedRequests(t *testing.T) {
 			decision:    "",
 		},
 		{
-			name:        "unsupported",
-			body:        validWebhookBody(t, "req-git", "git"),
+			name: "unsupported capability",
+			body: strings.Replace(
+				validWebhookBody(t, "req-network", "curl"),
+				`"capability_type":"command"`,
+				`"capability_type":"network"`,
+				1,
+			),
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 			decision:    "denied",
@@ -236,7 +241,7 @@ func TestDecisionRequiresExactOriginAndJSON(t *testing.T) {
 	t.Parallel()
 
 	service, store := newTestServer(t, nil)
-	webhookDone := submitWebhook(service, validWebhookBody(t, "req-origin", approval.SupportedCommand))
+	webhookDone := submitWebhook(service, validWebhookBody(t, "req-origin", "gh"))
 	waitForPending(t, store)
 
 	tests := []struct {
@@ -288,7 +293,7 @@ func TestLateAndUnknownDecisions(t *testing.T) {
 	t.Parallel()
 
 	service, store := newTestServer(t, nil)
-	webhookDone := submitWebhook(service, validWebhookBody(t, "req-late", approval.SupportedCommand))
+	webhookDone := submitWebhook(service, validWebhookBody(t, "req-late", "gh"))
 	waitForPending(t, store)
 	first := performDecision(service, "req-late", `{"decision":"denied"}`, service.origin)
 	if first.Code != http.StatusOK {
@@ -320,7 +325,7 @@ func TestSSEPublishesSnapshotAndLifecycleEvents(t *testing.T) {
 	}()
 	waitForStreamContent(t, eventResponse, "event: snapshot")
 
-	webhookResult := submitWebhook(service, validWebhookBody(t, "req-sse", approval.SupportedCommand))
+	webhookResult := submitWebhook(service, validWebhookBody(t, "req-sse", "gh"))
 	waitForStreamContent(t, eventResponse, "event: pending", "req-sse")
 
 	decision := performDecision(service, "req-sse", `{"decision":"granted"}`, service.origin)

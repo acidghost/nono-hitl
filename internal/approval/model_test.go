@@ -54,13 +54,16 @@ func TestDecodeWebhookRejectsUnsupportedCapability(t *testing.T) {
 	}
 }
 
-func TestDecodeWebhookRejectsUnsupportedCommand(t *testing.T) {
+func TestDecodeWebhookAcceptsAnyCommand(t *testing.T) {
 	t.Parallel()
 
 	payload := validPayload(`"command":"git"`)
-	_, err := DecodeWebhook(strings.NewReader(payload))
-	if !errors.Is(err, ErrUnsupportedCommand) {
-		t.Fatalf("error = %v, want ErrUnsupportedCommand", err)
+	envelope, err := DecodeWebhook(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("DecodeWebhook() error = %v", err)
+	}
+	if envelope.Request.Command != "git" {
+		t.Fatalf("Command = %q, want git", envelope.Request.Command)
 	}
 }
 
@@ -72,11 +75,13 @@ func TestDecodeWebhookRejectsInvalidRequests(t *testing.T) {
 		"multiple JSON values": validPayload(`"command":"gh"`) + `{}`,
 		"missing backend":      strings.Replace(validPayload(`"command":"gh"`), `"backend":"nono-hitl",`, "", 1),
 		"missing request ID":   strings.Replace(validPayload(`"command":"gh"`), `"request_id":"req-1"`, `"request_id":""`, 1),
+		"missing command":      validPayload(`"command":""`),
 		"missing arguments":    strings.Replace(validPayload(`"command":"gh"`), `"args":["gh","status"]`, `"args":[]`, 1),
 		"missing caller":       strings.Replace(validPayload(`"command":"gh"`), `"caller":"session"`, `"caller":""`, 1),
 		"missing rule":         strings.Replace(validPayload(`"command":"gh"`), `"intercept_rule":"default"`, `"intercept_rule":""`, 1),
 		"missing session":      strings.Replace(validPayload(`"command":"gh"`), `"session_id":"session-1"`, `"session_id":""`, 1),
 		"oversized request ID": strings.Replace(validPayload(`"command":"gh"`), `"req-1"`, strings.Repeat("r", maxRequestIDBytes+1), 1),
+		"oversized command":    validPayload(`"command":"` + strings.Repeat("c", maxCommandBytes+1) + `"`),
 		"oversized argument":   strings.Replace(validPayload(`"command":"gh"`), `"status"`, strings.Repeat("a", maxArgumentBytes+1), 1),
 	}
 
@@ -134,7 +139,7 @@ func testEnvelope(requestID string) WebhookEnvelope {
 		Request: CommandRequest{
 			CapabilityType: CapabilityCommand,
 			RequestID:      requestID,
-			Command:        SupportedCommand,
+			Command:        "gh",
 			Args:           []string{"gh", "status"},
 			Caller:         "session",
 			InterceptRule:  "invocation_policy.default",

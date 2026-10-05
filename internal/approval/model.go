@@ -10,7 +10,6 @@ import (
 
 const (
 	CapabilityCommand = "command"
-	SupportedCommand  = "gh"
 
 	maxBackendBytes   = 128
 	maxRequestIDBytes = 512
@@ -24,7 +23,6 @@ const (
 var (
 	ErrInvalidRequest        = errors.New("invalid approval request")
 	ErrUnsupportedCapability = errors.New("unsupported approval capability")
-	ErrUnsupportedCommand    = errors.New("unsupported approval command")
 )
 
 // WebhookEnvelope is the payload sent by nono's webhook approval backend.
@@ -94,14 +92,11 @@ func (r CommandRequest) Validate() error {
 	if r.CapabilityType != CapabilityCommand {
 		return fmt.Errorf("%w: %q", ErrUnsupportedCapability, r.CapabilityType)
 	}
-	if r.Command != SupportedCommand {
-		return fmt.Errorf("%w: %q", ErrUnsupportedCommand, r.Command)
-	}
 	if r.RequestID == "" || len(r.RequestID) > maxRequestIDBytes {
 		return fmt.Errorf("%w: request_id must contain 1 to %d bytes", ErrInvalidRequest, maxRequestIDBytes)
 	}
-	if len(r.Command) > maxCommandBytes {
-		return fmt.Errorf("%w: command exceeds %d bytes", ErrInvalidRequest, maxCommandBytes)
+	if r.Command == "" || len(r.Command) > maxCommandBytes {
+		return fmt.Errorf("%w: command must contain 1 to %d bytes", ErrInvalidRequest, maxCommandBytes)
 	}
 	if len(r.Args) == 0 || len(r.Args) > maxArguments {
 		return fmt.Errorf("%w: args must contain 1 to %d entries", ErrInvalidRequest, maxArguments)

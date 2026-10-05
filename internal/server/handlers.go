@@ -65,7 +65,7 @@ func (s *Server) handleWebhook(writer http.ResponseWriter, request *http.Request
 
 	envelope, err := approval.DecodeWebhook(bytes.NewReader(body))
 	if err != nil {
-		if errors.Is(err, approval.ErrUnsupportedCapability) || errors.Is(err, approval.ErrUnsupportedCommand) {
+		if errors.Is(err, approval.ErrUnsupportedCapability) {
 			writeJSON(writer, http.StatusOK, decisionResponse{
 				Decision: "denied",
 				Reason:   "Unsupported approval request",

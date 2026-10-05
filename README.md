@@ -2,7 +2,7 @@
 
 `nono-hitl` is a local human-approval backend for [nono](https://github.com/nolabs-ai/nono) command policies. It receives synchronous webhook requests from nono, shows them in a browser outside the wrapped terminal UI, and returns a grant or denial.
 
-The MVP accepts only direct `gh` command approvals. Approval does not construct a sandbox or add privileges: it releases the static delegated-child policy already authored in the nono profile.
+The service accepts command approvals for any program. Approval does not construct a sandbox or add privileges: it releases the static delegated-child policy already authored in the nono profile.
 
 ## Security status
 
@@ -99,7 +99,7 @@ The UI receives lifecycle events over SSE and periodically reconciles an atomic 
 
 ## Profile wiring
 
-The examples separate two responsibilities:
+`nono-hitl` does not restrict the program named by a command request; nono's pre-authored command policy remains the authority boundary. The included profiles demonstrate a `gh` integration and separate two responsibilities:
 
 - [`gh-approval-profile.jsonc`](examples/gh-approval-profile.jsonc) gates direct `gh` invocations and defines the delegated child sandbox;
 - a GitHub API profile enables `api.github.com` and supplies a phantom `GH_TOKEN` through nono's proxy.
@@ -141,7 +141,7 @@ The unauthenticated decision API is protected by sandbox reachability, not by a 
 
 Browser-origin controls provide defense in depth against cross-origin web pages: decision requests require the exact loopback `Origin`, JSON content type, and exact `Host`; the service emits no CORS permission headers and all GET routes are side-effect free. These controls do not make a localhost-reachable hostile process safe.
 
-Approval releases only the profile's static child sandbox. Request arguments are displayed as untrusted text, never shell-parsed or executed by `nono-hitl`, and rendered through DOM `textContent`. The service accepts only nono command requests for exact command name `gh`; unsupported capabilities and commands fail closed.
+Approval releases only the profile's static child sandbox. Request arguments are displayed as untrusted text, never shell-parsed or executed by `nono-hitl`, and rendered through DOM `textContent`. The service accepts nono command requests for any non-empty command name; unsupported capability types fail closed.
 
 ### Bounded, fail-closed behavior
 
