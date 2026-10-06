@@ -1,24 +1,57 @@
 (() => {
-	const elements = {
-		actionStatus: document.getElementById("action-status"),
-		connection: document.getElementById("connection-status"),
-		connectionLabel: document.querySelector(".connection-label"),
-		notifications: document.getElementById("notifications-button"),
-		pendingCount: document.getElementById("pending-count"),
-		pendingEmpty: document.getElementById("pending-empty"),
-		pendingList: document.getElementById("pending-list"),
-		recentEmpty: document.getElementById("recent-empty"),
-		recentList: document.getElementById("recent-list"),
-	};
+	const preferenceKey = "nono-hitl-mint-theme";
+	const system = window.matchMedia("(prefers-color-scheme: dark)");
+	const validMode = (value) => ["system", "light", "dark"].includes(value);
+	const forced = new URLSearchParams(window.location.search).get("theme");
+	let mode = "system";
+	try {
+		const saved = localStorage.getItem(preferenceKey);
+		if (validMode(saved)) mode = saved;
+	} catch {} // file:// and private contexts may disallow storage.
+	if (forced === "light" || forced === "dark") mode = forced;
 
-	const approvals = {
-		pending: new Map(),
-		recent: new Map(),
-	};
+	function applyTheme() {
+		const effective = mode === "system" ? (system.matches ? "dark" : "light") : mode;
+		document.documentElement.dataset.theme = effective;
+		document.documentElement.dataset.themeMode = mode;
+		const selector = document.getElementById("color-theme");
+		if (selector) selector.value = mode;
+	}
+	applyTheme(); // Before the page's styles/body, avoiding the wrong-theme first paint.
+	system.addEventListener("change", () => {
+		if (mode === "system") applyTheme();
+	});
+	document.addEventListener("DOMContentLoaded", () => {
+		const selector = document.getElementById("color-theme");
+		selector.value = mode;
+		selector.addEventListener("change", () => {
+			if (!validMode(selector.value)) return;
+			mode = selector.value;
+			try {
+				localStorage.setItem(preferenceKey, mode);
+			} catch {}
+			applyTheme();
+			const status = document.getElementById("live");
+			if (status) status.textContent = `Theme set to ${mode}.`;
+		});
+	});
+})();
 
+// The script runs in the head; dashboard elements are available after parsing.
+document.addEventListener("DOMContentLoaded", () => {
+	const $ = (id) => document.getElementById(id);
+	const elements = { notifications: $("notification"), actionStatus: $("live") };
+	const approvals = { pending: new Map(), recent: new Map() };
+	const sending = new Set();
+	const feedback = new Map();
 	const notifiedIDs = new Set();
 	const notificationOrder = [];
+	let selectedID = "";
+	let renderedID = "";
+	let connected = false;
 	let eventSource;
+	let stateVersion = 0;
+	let snapshotInFlight = false;
 
 	function requestID(approval) {
 		return String(approval?.envelope?.request?.request_id ?? "");
@@ -28,9 +61,24 @@
 		return approval?.envelope?.request ?? {};
 	}
 
+	function selectedApproval() {
+		return approvals.pending.get(selectedID) ?? approvals.recent.get(selectedID);
+	}
+
+	function commandTitle(approval) {
+		const request = commandRequest(approval);
+		const args = Array.isArray(request.args) ? request.args : [];
+		return safeInline([request.command, ...args.slice(1, 3)].join(" "), 100) || "Command request";
+	}
+
 	function setConnection(state, label) {
-		elements.connection.dataset.state = state;
-		elements.connectionLabel.textContent = label;
+		connected = state === "online";
+		$("connection").dataset.state = state;
+		$("connection-label").textContent = label;
+		$("offline-banner").hidden = connected;
+		$("offline-banner").textContent =
+			`${state === "offline" ? "Connection lost." : "Synchronizing request state."} Decisions are disabled until the request state is reconciled. Requests still deny at their deadlines.`;
+		updateTimes();
 	}
 
 	function announce(message) {
@@ -43,12 +91,9 @@
 	function applySnapshot(snapshot) {
 		approvals.pending.clear();
 		approvals.recent.clear();
-
 		for (const approval of Array.isArray(snapshot?.pending) ? snapshot.pending : []) {
 			const id = requestID(approval);
-			if (id) {
-				approvals.pending.set(id, approval);
-			}
+			if (id) approvals.pending.set(id, approval);
 		}
 		for (const approval of Array.isArray(snapshot?.recent) ? snapshot.recent : []) {
 			const id = requestID(approval);
@@ -57,83 +102,120 @@
 				approvals.recent.set(id, approval);
 			}
 		}
+		for (const id of feedback.keys()) {
+			if (!approvals.pending.has(id)) feedback.delete(id);
+		}
 		render();
 		approvals.pending.forEach(notify);
 	}
 
 	function applyPending(approval) {
 		const id = requestID(approval);
-		if (!id) {
-			return;
-		}
+		if (!id) return;
 		const isNew = !approvals.pending.has(id);
 		approvals.recent.delete(id);
 		approvals.pending.set(id, approval);
 		render();
 		if (isNew) {
 			notify(approval);
-			announce(`Approval requested for ${safeInline(commandRequest(approval).command, 80)}`);
+			announce(`Approval requested for ${commandTitle(approval)}`);
 		}
 	}
 
 	function applyResolved(approval) {
 		const id = requestID(approval);
-		if (!id) {
-			return;
-		}
+		if (!id) return;
+		const focusReview = id === selectedID && $("pending-actions").contains(document.activeElement);
 		approvals.pending.delete(id);
 		approvals.recent.set(id, approval);
+		feedback.delete(id);
 		render();
-		announce(`Request ${safeInline(id, 80)} was ${stateLabel(approval.state)}`);
+		if (focusReview) $("review").focus({ preventScroll: true });
+		announce(`${stateLabel(approval.state)}: ${commandTitle(approval)}`);
 	}
 
 	async function refreshSnapshot() {
+		if (snapshotInFlight) return;
+		snapshotInFlight = true;
+		const version = stateVersion;
 		try {
 			const response = await fetch("/api/v1/approvals", {
 				credentials: "omit",
 				headers: { Accept: "application/json" },
 			});
-			if (!response.ok) {
-				throw new Error(`snapshot returned HTTP ${response.status}`);
+			if (!response.ok) throw new Error(`snapshot returned HTTP ${response.status}`);
+			const snapshot = await response.json();
+			// An event received during this fetch is newer than the HTTP snapshot.
+			if (version !== stateVersion) return;
+			applySnapshot(snapshot);
+			if (eventSource?.readyState === EventSource.OPEN) {
+				setConnection("online", "Connected locally");
 			}
-			applySnapshot(await response.json());
 		} catch (error) {
-			setConnection("offline", "Disconnected");
+			if (version === stateVersion) setConnection("offline", "Disconnected");
 			console.warn("Could not refresh approval snapshot", error);
+		} finally {
+			snapshotInFlight = false;
 		}
 	}
 
 	function connectEvents() {
-		if (eventSource) {
-			eventSource.close();
-		}
-
+		if (eventSource) eventSource.close();
 		setConnection("connecting", "Connecting");
 		eventSource = new EventSource("/api/v1/events");
 		eventSource.addEventListener("open", () => {
-			setConnection("online", "Connected");
+			// A transport connection alone does not reconcile missed resolutions.
+			stateVersion++;
+			setConnection("connecting", "Reconciling");
 		});
 		eventSource.addEventListener("snapshot", (event) => {
-			parseEvent(event, applySnapshot);
+			if (parseEvent(event, applySnapshot)) setConnection("online", "Connected locally");
 		});
-		eventSource.addEventListener("pending", (event) => {
-			parseEvent(event, applyPending);
-		});
-		eventSource.addEventListener("resolved", (event) => {
-			parseEvent(event, applyResolved);
-		});
+		eventSource.addEventListener("pending", (event) => parseEvent(event, applyPending));
+		eventSource.addEventListener("resolved", (event) => parseEvent(event, applyResolved));
 		eventSource.addEventListener("error", () => {
-			setConnection("connecting", "Reconnecting");
+			stateVersion++;
+			setConnection("offline", "Reconnecting");
 		});
 	}
 
 	function parseEvent(event, apply) {
+		stateVersion++;
 		try {
 			apply(JSON.parse(event.data));
+			return true;
 		} catch (error) {
+			setConnection("connecting", "Reconciling");
 			console.warn("Ignored malformed approval event", error);
 			void refreshSnapshot();
+			return false;
 		}
+	}
+
+	function selectRequest(id) {
+		selectedID = id;
+		render();
+	}
+
+	function replaceSelectors(container, buttons) {
+		const active = document.activeElement;
+		const focusedID = container.contains(active) ? active.dataset.requestId : "";
+		container.replaceChildren(...buttons);
+		if (focusedID) {
+			const replacement = buttons.find((button) => button.dataset.requestId === focusedID);
+			(replacement ?? $("review")).focus({ preventScroll: true });
+		}
+	}
+
+	function selector(approval, className) {
+		const button = element("button", className);
+		const id = requestID(approval);
+		button.type = "button";
+		button.dataset.requestId = id;
+		button.setAttribute("aria-pressed", String(id === selectedID));
+		button.setAttribute("aria-controls", "sheet");
+		button.addEventListener("click", () => selectRequest(id));
+		return button;
 	}
 
 	function render() {
@@ -143,204 +225,230 @@
 		const recent = [...approvals.recent.values()].sort((left, right) => {
 			return timestamp(right.resolution?.resolved_at) - timestamp(left.resolution?.resolved_at);
 		});
-
-		elements.pendingList.replaceChildren(...pending.map(renderPending));
-		elements.pendingCount.textContent = String(pending.length);
-		elements.pendingEmpty.hidden = pending.length !== 0;
-
-		elements.recentList.replaceChildren(...recent.map(renderRecent));
-		elements.recentEmpty.hidden = recent.length !== 0;
+		if (!selectedApproval()) selectedID = requestID(pending[0]);
+		$("pending-count").textContent = `${pending.length} waiting`;
+		$("queue-number").textContent = String(pending.length);
+		$("queue-empty").hidden = pending.length !== 0;
+		$("history-empty").hidden = recent.length !== 0;
+		replaceSelectors(
+			$("queue-items"),
+			pending.map((approval) => {
+				const button = selector(approval, "queue-item");
+				const clock = textElement("span", "queue-meta text-small text-muted", "");
+				clock.dataset.deadline = approval.deadline;
+				button.append(
+					textElement("span", "queue-command break-anywhere", commandTitle(approval)),
+					clock,
+				);
+				return button;
+			}),
+		);
+		replaceSelectors(
+			$("history-items"),
+			recent.map((approval) => {
+				const button = selector(approval, "history-item");
+				const resolved = approval.resolution?.resolved_at;
+				const time = textElement("time", "history-time text-small text-muted", shortTime(resolved));
+				time.dateTime = String(resolved ?? "");
+				time.title = fullTime(resolved);
+				button.setAttribute(
+					"aria-label",
+					`${stateLabel(approval.state)}: ${commandTitle(approval)}, ${fullTime(resolved)}`,
+				);
+				button.append(
+					textElement(
+						"span",
+						`mini-stamp text-small ${approval.state}`,
+						stateLabel(approval.state),
+					),
+					textElement("span", "history-command break-anywhere", commandTitle(approval)),
+					time,
+				);
+				return button;
+			}),
+		);
+		renderSheet(selectedApproval());
 		updateTimes();
 	}
 
-	function renderPending(approval) {
-		const request = commandRequest(approval);
-		const article = element("article", "approval-card approval-card-pending");
-		article.tabIndex = -1;
-		article.dataset.requestId = requestID(approval);
-
-		const top = element("div", "card-top");
-		const titleGroup = element("div", "card-title-group");
-		titleGroup.append(
-			badge("pending", "Waiting"),
-			textElement("h3", "command-title", safeInline(request.command, 256) || "Command request"),
-		);
-		top.append(titleGroup, pendingClock(approval));
-
-		article.append(top, commandDetails(approval), metadata(approval));
-
-		const feedback = textElement("p", "decision-feedback", "");
-		feedback.setAttribute("role", "status");
-		const actions = element("div", "decision-actions");
-		const deny = actionButton("Deny", "button button-deny", approval, "denied", feedback);
-		const grant = actionButton(
-			"Approve once",
-			"button button-approve",
-			approval,
-			"granted",
-			feedback,
-		);
-		actions.append(deny, grant);
-		article.append(feedback, actions);
-		return article;
+	function metadataItem(label, value) {
+		const row = element("div", "");
+		const dd = element("dd", "break-anywhere");
+		dd.append(textElement("code", "text-small pre-wrap", String(value ?? "—")));
+		row.append(textElement("dt", "text-small text-muted", label), dd);
+		return row;
 	}
 
-	function renderRecent(approval) {
-		const request = commandRequest(approval);
-		const article = element("article", "approval-card approval-card-recent");
-		const top = element("div", "card-top");
-		const titleGroup = element("div", "card-title-group");
-		titleGroup.append(
-			badge(approval.state, stateLabel(approval.state)),
-			textElement("h3", "command-title", safeInline(request.command, 256) || "Command request"),
-		);
-		top.append(titleGroup, resolvedClock(approval));
-		article.append(top, commandDetails(approval), metadata(approval));
-
-		const reason = approval.resolution?.reason;
-		if (reason) {
-			const resolution = element("div", "resolution-reason");
-			resolution.append(textElement("span", "metadata-label", "Resolution reason"));
-			resolution.append(textElement("p", "metadata-value", reason));
-			article.append(resolution);
+	function renderSheet(approval) {
+		$("sheet").hidden = !approval;
+		$("empty-sheet").hidden = !!approval;
+		if (!approval) {
+			renderedID = "";
+			return;
 		}
-		return article;
-	}
-
-	function commandDetails(approval) {
-		const request = commandRequest(approval);
-		const details = element("div", "command-details");
-
-		const command = element("div", "detail-row");
-		command.append(textElement("span", "detail-label", "Command"));
-		const commandValue = textElement("code", "command-token", String(request.command ?? ""));
-		command.append(commandValue);
-
-		const argumentsRow = element("div", "detail-row");
-		argumentsRow.append(textElement("span", "detail-label", "Arguments"));
-		const argumentsList = element("ol", "argument-list");
-		const args = Array.isArray(request.args) ? request.args : [];
-		args.forEach((argument, index) => {
-			const item = element("li", "argument-item");
-			item.append(
-				textElement("span", "argument-index", String(index)),
-				textElement("code", "argument-token", String(argument)),
-			);
-			argumentsList.append(item);
-		});
-		argumentsRow.append(argumentsList);
-		details.append(command, argumentsRow);
-		return details;
-	}
-
-	function metadata(approval) {
-		const request = commandRequest(approval);
-		const grid = element("dl", "metadata-grid");
-		metadataItem(grid, "Caller", request.caller);
-		metadataItem(grid, "Rule", request.intercept_rule);
-		metadataItem(grid, "Request reason", request.reason || "—");
-		metadataItem(grid, "Session", request.session_id);
-		metadataItem(grid, "Child PID", request.child_pid);
-		metadataItem(grid, "Request ID", request.request_id);
-		return grid;
-	}
-
-	function metadataItem(list, label, value) {
-		const wrapper = element("div", "metadata-item");
-		wrapper.append(
-			textElement("dt", "metadata-label", label),
-			textElement("dd", "metadata-value", String(value ?? "—")),
-		);
-		list.append(wrapper);
-	}
-
-	function pendingClock(approval) {
-		const clock = element("div", "request-clock");
-		clock.append(textElement("span", "clock-label", "Time remaining"));
-		const value = textElement("time", "clock-value", "—");
-		value.dateTime = String(approval.deadline ?? "");
-		value.dataset.deadline = String(approval.deadline ?? "");
-		value.dataset.createdAt = String(approval.created_at ?? "");
-		clock.append(value);
-		return clock;
-	}
-
-	function resolvedClock(approval) {
-		const clock = element("div", "request-clock request-clock-resolved");
-		clock.append(textElement("span", "clock-label", "Resolved"));
-		const value = textElement("time", "clock-value", "—");
-		value.dateTime = String(approval.resolution?.resolved_at ?? "");
-		value.dataset.resolvedAt = String(approval.resolution?.resolved_at ?? "");
-		clock.append(value);
-		return clock;
-	}
-
-	function actionButton(label, className, approval, decision, feedback) {
-		const button = textElement("button", className, label);
-		button.type = "button";
-		button.addEventListener("click", () => {
-			void decide(approval, decision, feedback, button.closest("article"));
-		});
-		return button;
-	}
-
-	async function decide(approval, decision, feedback, card) {
 		const id = requestID(approval);
-		const buttons = card.querySelectorAll("button");
-		buttons.forEach((button) => {
-			button.disabled = true;
-		});
-		card.setAttribute("aria-busy", "true");
-		feedback.textContent = decision === "granted" ? "Approving…" : "Denying…";
+		if (id !== renderedID) {
+			$("sheet")
+				.querySelectorAll("details")
+				.forEach((details) => {
+					details.open = false;
+				});
+			renderedID = id;
+		}
+		const request = commandRequest(approval);
+		const waiting = approval.state === "pending";
+		const args = Array.isArray(request.args) ? request.args : [];
+		$("sheet").dataset.state = approval.state;
+		$("sheet").setAttribute("aria-busy", String(sending.has(id)));
+		$("request-kind").textContent = waiting ? "Command approval" : "Resolved command request";
+		$("request-title").textContent = commandTitle(approval);
+		// Display only: these tokens are reported argv, never executable shell text.
+		$("command").textContent = args
+			.map((arg) => (/^[a-zA-Z0-9_./:@#=+-]+$/.test(arg) ? arg : JSON.stringify(arg)))
+			.join(" ");
+		$("argv-count").textContent = `Argument array (${args.length} entries)`;
+		$("argv-body").replaceChildren(
+			...args.map((arg, index) => {
+				const row = element("tr", "");
+				const th = textElement("th", "text-muted", `argv[${index}]`);
+				th.scope = "row";
+				const td = element("td", "");
+				td.append(textElement("code", "pre-wrap", JSON.stringify(arg)));
+				row.append(th, td);
+				return row;
+			}),
+		);
+		$("caller").textContent = request.caller ?? "—";
+		$("caller-help").textContent =
+			request.caller === "session"
+				? "Caller is the sandboxed session."
+				: "Reported caller label; not proof of safety.";
+		$("rule").textContent = request.intercept_rule ?? "—";
+		$("rule-help").textContent =
+			request.intercept_rule === "invocation_policy.default"
+				? "Default invocation policy requires approval."
+				: "Reported rule label; inspect the effective profile.";
+		$("reason").textContent = request.reason || "No reason supplied.";
+		$("technical-data").replaceChildren(
+			metadataItem("Command", JSON.stringify(request.command)),
+			metadataItem("Request ID", id),
+			metadataItem("Session ID", request.session_id),
+			metadataItem("Shim PID", request.child_pid),
+			metadataItem("Backend", approval.envelope?.backend),
+			metadataItem("Received", approval.created_at),
+			metadataItem("Deadline", approval.deadline),
+		);
+		$("pending-actions").hidden = !waiting;
+		$("terminal").hidden = waiting;
+		$("decision-feedback").textContent = feedback.get(id) ?? "";
+		$("clock-label").textContent = waiting
+			? "Denies at deadline"
+			: `Resolved ${shortTime(approval.resolution?.resolved_at)}`;
+		if (!waiting) {
+			$("clock-value").textContent = stateLabel(approval.state);
+			$("stamp").className = `stamp text-display ${approval.state}`;
+			$("stamp").textContent = stateLabel(approval.state);
+			$("terminal-title").textContent =
+				approval.state === "granted"
+					? "Approval granted for this invocation."
+					: "This request did not receive approval.";
+			$("terminal-reason").textContent = approval.resolution?.reason ?? "";
+			$("terminal-note").textContent =
+				{
+					granted: "Execution result is not reported by nono.",
+					denied: "Denying this invocation does not change the profile.",
+					expired: "The deadline passed without a grant; nono receives a denial.",
+					canceled: "The webhook caller disconnected; this request received no grant.",
+				}[approval.state] ?? "No approval can be given to a resolved request.";
+		}
+	}
 
+	function canDecide(approval) {
+		return (
+			connected &&
+			approval?.state === "pending" &&
+			!sending.has(requestID(approval)) &&
+			timestamp(approval.deadline) > Date.now()
+		);
+	}
+
+	async function decide(decision) {
+		const approval = selectedApproval();
+		if (!canDecide(approval)) return;
+		const id = requestID(approval);
+		sending.add(id);
+		feedback.set(id, decision === "granted" ? "Approving…" : "Denying…");
+		render();
 		try {
 			const response = await fetch(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
 				method: "POST",
 				credentials: "omit",
-				headers: {
-					Accept: "application/json",
-					"Content-Type": "application/json",
-				},
+				headers: { Accept: "application/json", "Content-Type": "application/json" },
 				body: JSON.stringify({
 					decision,
 					reason: decision === "granted" ? "Approved once in browser" : "Denied in browser",
 				}),
 			});
 			const payload = await response.json().catch(() => ({}));
-			if (!response.ok) {
+			if (!response.ok)
 				throw new Error(payload.error || `decision returned HTTP ${response.status}`);
+			if (payload.state !== decision || !Number.isFinite(timestamp(payload.resolved_at))) {
+				throw new Error("invalid decision response");
 			}
-			feedback.textContent = "Decision recorded.";
-			announce(`${decision === "granted" ? "Approved" : "Denied"} ${safeInline(id, 80)}`);
+			stateVersion++;
+			if (approvals.pending.has(id))
+				applyResolved({ ...approval, state: payload.state, resolution: payload });
 		} catch (error) {
-			feedback.textContent = `Could not record decision: ${safeInline(error.message, 160)}`;
-			buttons.forEach((button) => {
-				button.disabled = false;
-			});
-			card.removeAttribute("aria-busy");
-			announce("The decision was not recorded. Review the request and try again.");
+			stateVersion++;
+			feedback.set(id, `Could not confirm decision: ${safeInline(error.message, 160)}`);
+			setConnection("connecting", "Reconciling");
+			announce("The decision could not be confirmed. Reconciling the request state.");
 			void refreshSnapshot();
+		} finally {
+			sending.delete(id);
+			render();
 		}
 	}
 
 	function updateTimes() {
 		const now = Date.now();
 		document.querySelectorAll("[data-deadline]").forEach((item) => {
-			const deadline = timestamp(item.dataset.deadline);
-			const created = timestamp(item.dataset.createdAt);
-			const remaining = Math.max(0, deadline - now);
-			const age = Math.max(0, now - created);
-			item.textContent = `${duration(remaining)} · waiting ${duration(age)}`;
-			item.closest(".request-clock")?.classList.toggle("clock-urgent", remaining <= 10000);
+			item.textContent = `${duration(Math.max(0, timestamp(item.dataset.deadline) - now))} remaining`;
 		});
-		document.querySelectorAll("[data-resolved-at]").forEach((item) => {
-			const resolved = timestamp(item.dataset.resolvedAt);
-			item.textContent = Number.isFinite(resolved)
-				? `${new Date(resolved).toLocaleString()} · ${duration(Math.max(0, now - resolved))} ago`
-				: "—";
-		});
+		const approval = selectedApproval();
+		const waiting = approval?.state === "pending";
+		const remaining = timestamp(approval?.deadline) - now;
+		$("sheet")
+			.querySelector(".clock")
+			.classList.toggle("clock-urgent", waiting && remaining <= 10000);
+		if (waiting) $("clock-value").textContent = `${duration(Math.max(0, remaining))} remaining`;
+		$("approve").disabled = !canDecide(approval);
+		$("deny").disabled = !canDecide(approval);
 	}
 
+	function shortTime(value) {
+		const parsed = timestamp(value);
+		return Number.isFinite(parsed)
+			? new Date(parsed).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+			: "—";
+	}
+
+	function fullTime(value) {
+		const parsed = timestamp(value);
+		return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : "—";
+	}
+
+	function stateLabel(state) {
+		return (
+			{
+				pending: "Waiting",
+				granted: "Approved",
+				denied: "Denied",
+				expired: "Expired",
+				canceled: "Canceled",
+			}[state] ?? "Resolved"
+		);
+	}
 	function configureNotifications() {
 		if (!("Notification" in window)) {
 			elements.notifications.textContent = "Notifications unavailable";
@@ -402,15 +510,14 @@
 			notification.addEventListener("click", () => {
 				window.focus();
 				notification.close();
-				const card = [...document.querySelectorAll(".approval-card-pending")].find((item) => {
-					return item.dataset.requestId === id;
-				});
-				if (card) {
+				if (approvals.pending.has(id)) {
+					selectRequest(id);
+					const card = $("sheet");
 					const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
 						? "auto"
 						: "smooth";
 					card.scrollIntoView({ behavior, block: "center" });
-					card.querySelector(".button-deny")?.focus({ preventScroll: true });
+					$("deny").focus({ preventScroll: true });
 				}
 			});
 		} catch (error) {
@@ -423,27 +530,6 @@
 		notificationOrder.push(id);
 		if (notificationOrder.length > 512) {
 			notifiedIDs.delete(notificationOrder.shift());
-		}
-	}
-
-	function badge(state, label) {
-		const allowed = ["pending", "granted", "denied", "expired", "canceled"];
-		const normalized = allowed.includes(state) ? state : "canceled";
-		return textElement("span", `state-badge state-${normalized}`, label);
-	}
-
-	function stateLabel(state) {
-		switch (state) {
-			case "granted":
-				return "Granted";
-			case "denied":
-				return "Denied";
-			case "expired":
-				return "Expired";
-			case "canceled":
-				return "Canceled";
-			default:
-				return "Resolved";
 		}
 	}
 
@@ -490,16 +576,18 @@
 		return item;
 	}
 
+	$("listener").textContent = window.location.host;
+	$("approve").addEventListener("click", () => void decide("granted"));
+	$("deny").addEventListener("click", () => void decide("denied"));
 	configureNotifications();
 	render();
+	setConnection("connecting", "Connecting");
 	void refreshSnapshot().finally(connectEvents);
 	window.setInterval(updateTimes, 1000);
 	window.setInterval(() => void refreshSnapshot(), 15000);
 	window.addEventListener("online", () => void refreshSnapshot());
 	window.addEventListener("blur", () => approvals.pending.forEach(notify));
 	document.addEventListener("visibilitychange", () => {
-		if (document.visibilityState === "visible") {
-			void refreshSnapshot();
-		}
+		if (document.visibilityState === "visible") void refreshSnapshot();
 	});
-})();
+});

@@ -140,6 +140,13 @@ shuts the HTTP server down gracefully.
 Open <http://127.0.0.1:8765/>. Do not substitute `localhost`: exact `Host` and
 same-origin checks are intentional.
 
+Select a waiting request tab to review its command, exact argument array, and
+reported context. Recent decisions open the same request sheet with its final
+outcome; approval does not report whether the command executed successfully.
+Decisions are disabled while disconnected, until the request state is
+reconciled, and once the deadline has passed. The **Theme** selector follows the
+system by default; explicit light/dark preferences are saved in this browser.
+
 The dashboard works without browser notifications. To receive them:
 
 1. keep the dashboard open;
