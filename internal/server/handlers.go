@@ -19,6 +19,7 @@ const maxDecisionReasonBytes = 4 * 1024
 
 type decisionRequest struct {
 	Decision string `json:"decision"`
+	Scope    string `json:"scope,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 }
 
@@ -28,8 +29,9 @@ type decisionResponse struct {
 }
 
 type snapshotResponse struct {
-	Pending []approval.Approval `json:"pending"`
-	Recent  []approval.Approval `json:"recent"`
+	Pending []approval.Approval     `json:"pending"`
+	Recent  []approval.Approval     `json:"recent"`
+	Grants  []approval.SessionGrant `json:"grants"`
 }
 
 func (s *Server) routes() http.Handler {
@@ -43,6 +45,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/approvals", s.handleSnapshot)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 	mux.HandleFunc("POST /api/v1/approvals/{id}/decision", s.handleDecision)
+	mux.HandleFunc("DELETE /api/v1/grants/{id}", s.handleRevoke)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	return s.securityHeaders(s.validateHost(mux))
@@ -127,19 +130,47 @@ func (s *Server) handleDecision(writer http.ResponseWriter, request *http.Reques
 		writeError(writer, http.StatusBadRequest, "decision must be granted or denied")
 		return
 	}
-	resolution, err := s.store.Decide(request.PathValue("id"), state, requested.Reason)
+
+	var resolution approval.Resolution
+	switch requested.Scope {
+	case "", "once":
+		resolution, err = s.store.Decide(request.PathValue("id"), state, requested.Reason)
+	case approval.ScopeSession:
+		if state != approval.StateGranted {
+			writeError(writer, http.StatusBadRequest, "only grants can apply to the session")
+			return
+		}
+		resolution, err = s.store.DecideForSession(request.PathValue("id"), requested.Reason)
+	default:
+		writeError(writer, http.StatusBadRequest, "scope must be once or session")
+		return
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, approval.ErrAlreadyResolved):
 			writeError(writer, http.StatusConflict, "approval is already resolved")
 		case errors.Is(err, approval.ErrNotFound):
 			writeError(writer, http.StatusNotFound, "approval was not found")
+		case errors.Is(err, approval.ErrGrantsDisabled):
+			writeError(writer, http.StatusBadRequest, "session approvals are disabled")
 		default:
 			writeError(writer, http.StatusInternalServerError, "could not resolve approval")
 		}
 		return
 	}
 	writeJSON(writer, http.StatusOK, resolution)
+}
+
+func (s *Server) handleRevoke(writer http.ResponseWriter, request *http.Request) {
+	if request.Header.Get("Origin") != s.origin {
+		writeError(writer, http.StatusForbidden, "revocation requires the local UI origin")
+		return
+	}
+	if err := s.store.Revoke(request.PathValue("id")); err != nil {
+		writeError(writer, http.StatusNotFound, "session approval was not found")
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleEvents(writer http.ResponseWriter, request *http.Request) {
@@ -179,7 +210,11 @@ func (s *Server) handleEvents(writer http.ResponseWriter, request *http.Request)
 			if !open {
 				return
 			}
-			if err := writeSSE(writer, string(event.Kind), event.Approval); err != nil {
+			var data any = event.Approval
+			if event.Kind == approval.EventGrants {
+				data = event.Grants
+			}
+			if err := writeSSE(writer, string(event.Kind), data); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -230,8 +265,8 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 }
 
 func (s *Server) snapshot() snapshotResponse {
-	pending, recent := s.store.Snapshot()
-	return snapshotResponse{Pending: pending, Recent: recent}
+	pending, recent, grants := s.store.Snapshot()
+	return snapshotResponse{Pending: pending, Recent: recent, Grants: grants}
 }
 
 func writeResolution(writer http.ResponseWriter, resolution approval.Resolution) {

@@ -88,6 +88,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	store, err := approval.NewStore(approval.StoreConfig{
 		MaxPending: 32,
 		MaxRecent:  100,
+		MaxGrants:  64,
 	})
 	if err != nil {
 		return fmt.Errorf("create approval store: %w", err)

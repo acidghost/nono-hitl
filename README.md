@@ -158,6 +158,22 @@ dashboard is closed, disconnected, denied notification permission, or never
 opened, the webhook continues waiting and fails closed at its deadline. The
 absence of a browser never grants a command.
 
+### Session approvals
+
+**Approve for session** grants the request and also grants later requests from
+the same nono session whose command, argument array, caller, and rule match it
+exactly. Matching requests already waiting are granted at once. The session is
+the `session_id` nono's supervisor reports for each `nono run`, so a new run
+starts without session approvals.
+
+`nono-hitl` cannot tell when a nono session ends. Session approvals stay in
+memory until revoked from the dashboard, evicted (oldest first, at most 64), or
+the service restarts. Requests released this way appear in recent decisions.
+
+Exactness covers only what nono reports: nono omits arguments that are not
+valid UTF-8 from the request, so two invocations differing only in such an
+argument look identical.
+
 The UI receives lifecycle events over SSE and periodically reconciles an atomic
 snapshot, so reconnecting does not create a second approval or lose the
 authoritative state. Recently resolved requests are bounded in memory and
@@ -226,6 +242,7 @@ for any non-empty command name; unsupported capability types fail closed.
 
 - at most 32 requests may be pending;
 - at most 100 terminal requests remain in volatile history;
+- at most 64 session approvals are kept; the oldest is evicted first;
 - request bodies, fields, arguments, decision bodies, SSE clients, and
   subscriber buffers are bounded;
 - malformed, oversized, duplicate, late, canceled, unsupported, timed-out, and

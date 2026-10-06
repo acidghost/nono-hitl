@@ -311,6 +311,58 @@ func TestLateAndUnknownDecisions(t *testing.T) {
 	}
 }
 
+func TestSessionApprovalGrantsIdenticalRequestsUntilRevoked(t *testing.T) {
+	t.Parallel()
+
+	service, store := newTestServer(t, nil)
+	webhookDone := submitWebhook(service, validWebhookBody(t, "req-first", "gh"))
+	waitForPending(t, store)
+
+	denySession := performDecision(service, "req-first", `{"decision":"denied","scope":"session"}`, service.origin)
+	if denySession.Code != http.StatusBadRequest {
+		t.Fatalf("session denial status = %d, want %d", denySession.Code, http.StatusBadRequest)
+	}
+	badScope := performDecision(service, "req-first", `{"decision":"granted","scope":"forever"}`, service.origin)
+	if badScope.Code != http.StatusBadRequest {
+		t.Fatalf("unknown scope status = %d, want %d", badScope.Code, http.StatusBadRequest)
+	}
+	decision := performDecision(service, "req-first", `{"decision":"granted","scope":"session"}`, service.origin)
+	if decision.Code != http.StatusOK {
+		t.Fatalf("session decision status = %d, want %d: %s", decision.Code, http.StatusOK, decision.Body.String())
+	}
+	assertWebhookDecision(t, awaitHTTPResponse(t, webhookDone).Body, "granted")
+
+	repeat := awaitHTTPResponse(t, submitWebhook(service, validWebhookBody(t, "req-repeat", "gh")))
+	assertWebhookDecision(t, repeat.Body, "granted")
+
+	var state snapshotResponse
+	decodeResponse(t, performRequest(service, http.MethodGet, "/api/v1/approvals", "", nil).Body, &state)
+	if len(state.Grants) != 1 || state.Grants[0].ID != "req-first" {
+		t.Fatalf("snapshot grants = %+v, want req-first", state.Grants)
+	}
+
+	revokePath := "/api/v1/grants/req-first"
+	crossOrigin := performRequest(service, http.MethodDelete, revokePath, "", map[string]string{"Origin": "http://evil.test"})
+	if crossOrigin.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin revoke status = %d, want %d", crossOrigin.Code, http.StatusForbidden)
+	}
+	revoke := performRequest(service, http.MethodDelete, revokePath, "", map[string]string{"Origin": service.origin})
+	if revoke.Code != http.StatusNoContent {
+		t.Fatalf("revoke status = %d, want %d", revoke.Code, http.StatusNoContent)
+	}
+	missing := performRequest(service, http.MethodDelete, revokePath, "", map[string]string{"Origin": service.origin})
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("second revoke status = %d, want %d", missing.Code, http.StatusNotFound)
+	}
+
+	afterRevoke := submitWebhook(service, validWebhookBody(t, "req-after", "gh"))
+	waitForPending(t, store)
+	if denied := performDecision(service, "req-after", `{"decision":"denied"}`, service.origin); denied.Code != http.StatusOK {
+		t.Fatalf("denial status = %d, want %d", denied.Code, http.StatusOK)
+	}
+	assertWebhookDecision(t, awaitHTTPResponse(t, afterRevoke).Body, "denied")
+}
+
 func TestSSEPublishesSnapshotAndLifecycleEvents(t *testing.T) {
 	t.Parallel()
 
@@ -328,11 +380,12 @@ func TestSSEPublishesSnapshotAndLifecycleEvents(t *testing.T) {
 	webhookResult := submitWebhook(service, validWebhookBody(t, "req-sse", "gh"))
 	waitForStreamContent(t, eventResponse, "event: pending", "req-sse")
 
-	decision := performDecision(service, "req-sse", `{"decision":"granted"}`, service.origin)
+	decision := performDecision(service, "req-sse", `{"decision":"granted","scope":"session"}`, service.origin)
 	if decision.Code != http.StatusOK {
 		t.Fatalf("decision status = %d, want %d", decision.Code, http.StatusOK)
 	}
 	waitForStreamContent(t, eventResponse, "event: resolved", `"state":"granted"`)
+	waitForStreamContent(t, eventResponse, "event: grants", `"id":"req-sse"`)
 
 	webhook := awaitHTTPResponse(t, webhookResult)
 	assertWebhookDecision(t, webhook.Body, "granted")
@@ -400,7 +453,7 @@ func newTestServer(t *testing.T, mutate func(*Config)) (*Server, *approval.Store
 
 func newApprovalStore(t *testing.T) *approval.Store {
 	t.Helper()
-	store, err := approval.NewStore(approval.StoreConfig{MaxPending: 8, MaxRecent: 8})
+	store, err := approval.NewStore(approval.StoreConfig{MaxPending: 8, MaxRecent: 8, MaxGrants: 8})
 	if err != nil {
 		t.Fatalf("approval.NewStore() error = %v", err)
 	}

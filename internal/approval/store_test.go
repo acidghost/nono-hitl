@@ -222,7 +222,7 @@ func TestStoreSnapshotsDoNotExposeMutableRequestData(t *testing.T) {
 	waitForPending(t, store, 1)
 
 	envelope.Request.Args[0] = "changed outside"
-	pending, recent := store.Snapshot()
+	pending, recent, _ := store.Snapshot()
 	if len(pending) != 1 || len(recent) != 0 {
 		t.Fatalf("Snapshot() lengths = %d pending, %d recent; want 1, 0", len(pending), len(recent))
 	}
@@ -281,6 +281,125 @@ func TestStoreShutdownClosesSubscriptions(t *testing.T) {
 	}
 }
 
+func TestStoreSessionGrantReleasesOnlyExactRequests(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 16)
+	result := submitAsync(store, testEnvelope("req-grant"), time.Second)
+	waitForPending(t, store, 1)
+	granted, err := store.DecideForSession("req-grant", "approved for session")
+	if err != nil {
+		t.Fatalf("DecideForSession() error = %v", err)
+	}
+	if granted.State != StateGranted || granted.Scope != ScopeSession {
+		t.Fatalf("DecideForSession() = %+v, want granted session scope", granted)
+	}
+	_ = awaitResult(t, result)
+
+	repeat := awaitResult(t, submitAsync(store, testEnvelope("req-repeat"), time.Second))
+	if repeat.err != nil || repeat.resolution.State != StateGranted || repeat.resolution.Scope != ScopeSession {
+		t.Fatalf("identical request = %+v, %v; want session grant", repeat.resolution, repeat.err)
+	}
+
+	variants := map[string]func(*CommandRequest){
+		"session":        func(r *CommandRequest) { r.SessionID = "session-2" },
+		"command":        func(r *CommandRequest) { r.Command = "git" },
+		"argument":       func(r *CommandRequest) { r.Args = []string{"gh", "status "} },
+		"extra argument": func(r *CommandRequest) { r.Args = []string{"gh", "status", "--json"} },
+		"joined args":    func(r *CommandRequest) { r.Args = []string{"gh status"} },
+		"caller":         func(r *CommandRequest) { r.Caller = "gh" },
+		"rule":           func(r *CommandRequest) { r.InterceptRule = "other" },
+	}
+	for name, mutate := range variants {
+		envelope := testEnvelope("req-" + name)
+		mutate(&envelope.Request)
+		result := submitAsync(store, envelope, time.Second)
+		waitForPending(t, store, 1)
+		if _, err := store.Decide("req-"+name, StateDenied, "cleanup"); err != nil {
+			t.Fatalf("%s: Decide() error = %v", name, err)
+		}
+		if got := awaitResult(t, result); got.resolution.State != StateDenied {
+			t.Fatalf("%s: resolution = %+v, want denied", name, got.resolution)
+		}
+	}
+}
+
+func TestStoreSessionGrantResolvesMatchingPendingRequests(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 4)
+	first := submitAsync(store, testEnvelope("req-1"), time.Second)
+	second := submitAsync(store, testEnvelope("req-2"), time.Second)
+	other := testEnvelope("req-other")
+	other.Request.Args = []string{"gh", "other"}
+	third := submitAsync(store, other, time.Second)
+	waitForPending(t, store, 3)
+
+	if _, err := store.DecideForSession("req-1", ""); err != nil {
+		t.Fatalf("DecideForSession() error = %v", err)
+	}
+	for _, result := range []<-chan submitResult{first, second} {
+		if got := awaitResult(t, result); got.resolution.State != StateGranted {
+			t.Fatalf("resolution = %+v, want granted", got.resolution)
+		}
+	}
+	if pending := store.Pending(); len(pending) != 1 || pending[0].Envelope.Request.RequestID != "req-other" {
+		t.Fatalf("Pending() = %+v, want only req-other", pending)
+	}
+	_, _ = store.Decide("req-other", StateDenied, "cleanup")
+	_ = awaitResult(t, third)
+}
+
+func TestStoreSessionGrantsAreBoundedAndRevocable(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 16)
+	for _, id := range []string{"req-a", "req-b", "req-c"} {
+		envelope := testEnvelope(id)
+		envelope.Request.Args = []string{"gh", id}
+		result := submitAsync(store, envelope, time.Second)
+		waitForPending(t, store, 1)
+		if _, err := store.DecideForSession(id, ""); err != nil {
+			t.Fatalf("DecideForSession(%s) error = %v", id, err)
+		}
+		_ = awaitResult(t, result)
+	}
+	grants := store.Grants()
+	if len(grants) != 2 || grants[0].ID != "req-b" || grants[1].ID != "req-c" {
+		t.Fatalf("Grants() = %+v, want req-b and req-c", grants)
+	}
+
+	if err := store.Revoke("req-c"); err != nil {
+		t.Fatalf("Revoke() error = %v", err)
+	}
+	if err := store.Revoke("req-c"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second Revoke() error = %v, want ErrNotFound", err)
+	}
+	revoked := testEnvelope("req-c-again")
+	revoked.Request.Args = []string{"gh", "req-c"}
+	result := submitAsync(store, revoked, time.Second)
+	waitForPending(t, store, 1)
+	_, _ = store.Decide("req-c-again", StateDenied, "cleanup")
+	_ = awaitResult(t, result)
+}
+
+func TestStoreSessionGrantsCanBeDisabled(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewStore(StoreConfig{MaxPending: 1})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() { store.Shutdown("test cleanup") })
+	result := submitAsync(store, testEnvelope("req-1"), time.Second)
+	waitForPending(t, store, 1)
+	if _, err := store.DecideForSession("req-1", ""); !errors.Is(err, ErrGrantsDisabled) {
+		t.Fatalf("DecideForSession() error = %v, want ErrGrantsDisabled", err)
+	}
+	_, _ = store.Decide("req-1", StateDenied, "cleanup")
+	_ = awaitResult(t, result)
+}
+
 func TestNewStoreValidatesBounds(t *testing.T) {
 	t.Parallel()
 
@@ -289,6 +408,9 @@ func TestNewStoreValidatesBounds(t *testing.T) {
 	}
 	if _, err := NewStore(StoreConfig{MaxPending: 1, MaxRecent: -1}); err == nil {
 		t.Fatal("NewStore() error = nil, want invalid max recent error")
+	}
+	if _, err := NewStore(StoreConfig{MaxPending: 1, MaxGrants: -1}); err == nil {
+		t.Fatal("NewStore() error = nil, want invalid max grants error")
 	}
 }
 
@@ -299,7 +421,7 @@ type submitResult struct {
 
 func newTestStore(t *testing.T, maxPending, maxRecent int) *Store {
 	t.Helper()
-	store, err := NewStore(StoreConfig{MaxPending: maxPending, MaxRecent: maxRecent})
+	store, err := NewStore(StoreConfig{MaxPending: maxPending, MaxRecent: maxRecent, MaxGrants: 2})
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}

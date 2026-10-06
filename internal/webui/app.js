@@ -42,6 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const $ = (id) => document.getElementById(id);
   const elements = { notifications: $("notification"), actionStatus: $("live") };
   const approvals = { pending: new Map(), recent: new Map() };
+  let grants = [];
   const sending = new Set();
   const feedback = new Map();
   const notifiedIDs = new Set();
@@ -69,6 +70,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const request = commandRequest(approval);
     const args = Array.isArray(request.args) ? request.args : [];
     return safeInline([request.command, ...args.slice(1, 3)].join(" "), 100) || "Command request";
+  }
+
+  // Display only: these tokens are reported argv, never executable shell text.
+  function displayArgs(args) {
+    return (Array.isArray(args) ? args : [])
+      .map((arg) => (/^[a-zA-Z0-9_./:@#=+-]+$/.test(arg) ? arg : JSON.stringify(arg)))
+      .join(" ");
   }
 
   function setConnection(state, label) {
@@ -105,6 +113,7 @@ document.addEventListener("DOMContentLoaded", () => {
     for (const id of feedback.keys()) {
       if (!approvals.pending.has(id)) feedback.delete(id);
     }
+    grants = Array.isArray(snapshot?.grants) ? snapshot.grants : [];
     render();
     approvals.pending.forEach(notify);
   }
@@ -132,6 +141,11 @@ document.addEventListener("DOMContentLoaded", () => {
     render();
     if (focusReview) $("review").focus({ preventScroll: true });
     announce(`${stateLabel(approval.state)}: ${commandTitle(approval)}`);
+  }
+
+  function applyGrants(list) {
+    grants = Array.isArray(list) ? list : [];
+    render();
   }
 
   async function refreshSnapshot() {
@@ -173,6 +187,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     eventSource.addEventListener("pending", (event) => parseEvent(event, applyPending));
     eventSource.addEventListener("resolved", (event) => parseEvent(event, applyResolved));
+    eventSource.addEventListener("grants", (event) => parseEvent(event, applyGrants));
     eventSource.addEventListener("error", () => {
       stateVersion++;
       setConnection("offline", "Reconnecting");
@@ -267,8 +282,33 @@ document.addEventListener("DOMContentLoaded", () => {
         return button;
       }),
     );
+    $("grants-empty").hidden = grants.length !== 0;
+    $("grant-items").replaceChildren(...grants.map(grantItem));
     renderSheet(selectedApproval());
     updateTimes();
+  }
+
+  function grantItem(grant) {
+    const row = element("div", "grant-item");
+    const details = element("div", "");
+    details.append(
+      textElement("code", "break-anywhere pre-wrap", displayArgs(grant.args)),
+      textElement(
+        "p",
+        "text-small text-muted break-anywhere",
+        `Session ${safeInline(grant.session_id, 40)} · ${shortTime(grant.created_at)}`,
+      ),
+    );
+    const revokeButton = textElement("button", "quiet text-small", "Revoke");
+    revokeButton.type = "button";
+    revokeButton.disabled = !connected;
+    revokeButton.setAttribute(
+      "aria-label",
+      `Revoke session approval for ${safeInline(displayArgs(grant.args), 100)}`,
+    );
+    revokeButton.addEventListener("click", () => void revoke(String(grant.id ?? "")));
+    row.append(details, revokeButton);
+    return row;
   }
 
   function metadataItem(label, value) {
@@ -302,10 +342,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("sheet").setAttribute("aria-busy", String(sending.has(id)));
     $("request-kind").textContent = waiting ? "Command approval" : "Resolved command request";
     $("request-title").textContent = commandTitle(approval);
-    // Display only: these tokens are reported argv, never executable shell text.
-    $("command").textContent = args
-      .map((arg) => (/^[a-zA-Z0-9_./:@#=+-]+$/.test(arg) ? arg : JSON.stringify(arg)))
-      .join(" ");
+    $("command").textContent = displayArgs(args);
     $("argv-count").textContent = `Argument array (${args.length} entries)`;
     $("argv-body").replaceChildren(
       ...args.map((arg, index) => {
@@ -348,14 +385,19 @@ document.addEventListener("DOMContentLoaded", () => {
       $("clock-value").textContent = stateLabel(approval.state);
       $("stamp").className = `stamp text-display ${approval.state}`;
       $("stamp").textContent = stateLabel(approval.state);
+      const session = approval.resolution?.scope === "session";
       $("terminal-title").textContent =
-        approval.state === "granted"
-          ? "Approval granted for this invocation."
-          : "This request did not receive approval.";
+        approval.state !== "granted"
+          ? "This request did not receive approval."
+          : session
+            ? "Approval granted for this nono session."
+            : "Approval granted for this invocation.";
       $("terminal-reason").textContent = approval.resolution?.reason ?? "";
       $("terminal-note").textContent =
         {
-          granted: "Execution result is not reported by nono.",
+          granted: session
+            ? "Identical invocations in this nono session run without asking until revoked."
+            : "Execution result is not reported by nono.",
           denied: "Denying this invocation does not change the profile.",
           expired: "The deadline passed without a grant; nono receives a denial.",
           canceled: "The webhook caller disconnected; this request received no grant.",
@@ -372,22 +414,23 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
 
-  async function decide(decision) {
+  async function decide(decision, scope = "once") {
     const approval = selectedApproval();
     if (!canDecide(approval)) return;
     const id = requestID(approval);
     sending.add(id);
     feedback.set(id, decision === "granted" ? "Approving…" : "Denying…");
+    const reasons = {
+      once: decision === "granted" ? "Approved once in browser" : "Denied in browser",
+      session: "Approved for session in browser",
+    };
     render();
     try {
       const response = await fetch(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
         method: "POST",
         credentials: "omit",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          decision,
-          reason: decision === "granted" ? "Approved once in browser" : "Denied in browser",
-        }),
+        body: JSON.stringify({ decision, scope, reason: reasons[scope] }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok)
@@ -410,6 +453,25 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  async function revoke(id) {
+    if (!connected || !id) return;
+    try {
+      const response = await fetch(`/api/v1/grants/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "omit",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`revoke returned HTTP ${response.status}`);
+      }
+      announce("Session approval revoked.");
+    } catch (error) {
+      announce(`Could not revoke session approval: ${safeInline(error.message, 160)}`);
+    } finally {
+      void refreshSnapshot();
+    }
+  }
+
   function updateTimes() {
     const now = Date.now();
     document.querySelectorAll("[data-deadline]").forEach((item) => {
@@ -423,6 +485,7 @@ document.addEventListener("DOMContentLoaded", () => {
       .classList.toggle("clock-urgent", waiting && remaining <= 10000);
     if (waiting) $("clock-value").textContent = `${duration(Math.max(0, remaining))} remaining`;
     $("approve").disabled = !canDecide(approval);
+    $("approve-session").disabled = !canDecide(approval);
     $("deny").disabled = !canDecide(approval);
   }
 
@@ -578,6 +641,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("listener").textContent = window.location.host;
   $("approve").addEventListener("click", () => void decide("granted"));
+  $("approve-session").addEventListener("click", () => void decide("granted", "session"));
   $("deny").addEventListener("click", () => void decide("denied"));
   configureNotifications();
   render();

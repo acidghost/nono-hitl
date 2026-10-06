@@ -16,6 +16,7 @@ var (
 	ErrNotFound        = errors.New("approval request not found")
 	ErrAlreadyResolved = errors.New("approval request is already resolved")
 	ErrInvalidDecision = errors.New("invalid approval decision")
+	ErrGrantsDisabled  = errors.New("session approvals are disabled")
 )
 
 // State describes the lifecycle of an approval.
@@ -29,11 +30,28 @@ const (
 	StateCanceled State = "canceled"
 )
 
+// ScopeSession marks a grant that also releases later identical requests from
+// the same nono session.
+const ScopeSession = "session"
+
 // Resolution is the terminal result returned to a waiting webhook request.
 type Resolution struct {
 	State      State     `json:"state"`
+	Scope      string    `json:"scope,omitempty"`
 	Reason     string    `json:"reason,omitempty"`
 	ResolvedAt time.Time `json:"resolved_at"`
+}
+
+// SessionGrant approves every later request reporting exactly the same nono
+// session, command, argv, caller, and rule. ID is the approving request's ID.
+type SessionGrant struct {
+	ID            string    `json:"id"`
+	SessionID     string    `json:"session_id"`
+	Command       string    `json:"command"`
+	Args          []string  `json:"args"`
+	Caller        string    `json:"caller"`
+	InterceptRule string    `json:"intercept_rule"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // EventKind identifies an approval-store change.
@@ -42,13 +60,16 @@ type EventKind string
 const (
 	EventPending  EventKind = "pending"
 	EventResolved EventKind = "resolved"
+	EventGrants   EventKind = "grants"
 )
 
-// Event is an immutable approval-store notification. Subscribers must use a
-// snapshot to reconcile if their bounded event channel drops an update.
+// Event is an immutable approval-store notification. Grants events carry the
+// full grant list instead of an approval. Subscribers must use a snapshot to
+// reconcile if their bounded event channel drops an update.
 type Event struct {
-	Kind     EventKind `json:"kind"`
-	Approval Approval  `json:"approval"`
+	Kind     EventKind      `json:"kind"`
+	Approval Approval       `json:"approval"`
+	Grants   []SessionGrant `json:"grants,omitempty"`
 }
 
 // Approval is an immutable snapshot suitable for an API or UI.
@@ -64,6 +85,9 @@ type Approval struct {
 type StoreConfig struct {
 	MaxPending int
 	MaxRecent  int
+	// MaxGrants bounds session grants; the oldest is evicted when full. Zero
+	// disables session approvals.
+	MaxGrants int
 }
 
 type entry struct {
@@ -78,10 +102,12 @@ type Store struct {
 	pending     map[string]*entry
 	recent      []Approval
 	recentByID  map[string]struct{}
+	grants      map[string]SessionGrant
 	subscribers map[uint64]chan Event
 	nextSubID   uint64
 	maxPending  int
 	maxRecent   int
+	maxGrants   int
 	closed      bool
 }
 
@@ -93,14 +119,19 @@ func NewStore(config StoreConfig) (*Store, error) {
 	if config.MaxRecent < 0 {
 		return nil, errors.New("max recent approvals cannot be negative")
 	}
+	if config.MaxGrants < 0 {
+		return nil, errors.New("max session grants cannot be negative")
+	}
 
 	return &Store{
 		pending:     make(map[string]*entry, config.MaxPending),
 		recent:      make([]Approval, 0, config.MaxRecent),
 		recentByID:  make(map[string]struct{}, config.MaxRecent),
+		grants:      make(map[string]SessionGrant, config.MaxGrants),
 		subscribers: make(map[uint64]chan Event),
 		maxPending:  config.MaxPending,
 		maxRecent:   config.MaxRecent,
+		maxGrants:   config.MaxGrants,
 	}, nil
 }
 
@@ -155,6 +186,68 @@ func (s *Store) Decide(requestID string, decision State, reason string) (Resolut
 	return s.transition(requestID, decision, reason)
 }
 
+// DecideForSession grants a pending approval and remembers a session grant
+// for its exact request. Other pending requests matching the grant are
+// granted too.
+func (s *Store) DecideForSession(requestID string, reason string) (Resolution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.maxGrants == 0 {
+		return Resolution{}, ErrGrantsDisabled
+	}
+	item, err := s.pendingItemLocked(requestID)
+	if err != nil {
+		return Resolution{}, err
+	}
+
+	request := item.approval.Envelope.Request
+	key := grantKey(request)
+	if len(s.grants) >= s.maxGrants {
+		s.evictOldestGrantLocked()
+	}
+	s.grants[key] = SessionGrant{
+		ID:            requestID,
+		SessionID:     request.SessionID,
+		Command:       request.Command,
+		Args:          append([]string(nil), request.Args...),
+		Caller:        request.Caller,
+		InterceptRule: request.InterceptRule,
+		CreatedAt:     time.Now(),
+	}
+
+	resolution := s.finishLocked(item, StateGranted, ScopeSession, reason)
+	for _, other := range s.pending {
+		if grantKey(other.approval.Envelope.Request) == key {
+			s.finishLocked(other, StateGranted, ScopeSession, "Matched session approval")
+		}
+	}
+	s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
+	return resolution, nil
+}
+
+// Revoke removes the session grant with the given ID.
+func (s *Store) Revoke(grantID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for key, grant := range s.grants {
+		if grant.ID == grantID {
+			delete(s.grants, key)
+			s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrNotFound, grantID)
+}
+
+// Grants returns session grants ordered oldest first.
+func (s *Store) Grants() []SessionGrant {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.grantsLocked()
+}
+
 // Pending returns pending approvals ordered oldest first.
 func (s *Store) Pending() []Approval {
 	s.mu.RLock()
@@ -169,12 +262,13 @@ func (s *Store) Recent() []Approval {
 	return s.recentLocked()
 }
 
-// Snapshot returns pending and recent approvals from one atomic view of the
-// store. The returned approvals do not share mutable request data with it.
-func (s *Store) Snapshot() ([]Approval, []Approval) {
+// Snapshot returns pending and recent approvals and session grants from one
+// atomic view of the store. The returned values do not share mutable request
+// data with it.
+func (s *Store) Snapshot() ([]Approval, []Approval, []SessionGrant) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.pendingLocked(), s.recentLocked()
+	return s.pendingLocked(), s.recentLocked(), s.grantsLocked()
 }
 
 // Subscribe returns a bounded stream of store changes and an idempotent
@@ -234,7 +328,7 @@ func (s *Store) Shutdown(reason string) {
 	s.closed = true
 
 	for _, item := range s.pending {
-		s.finishLocked(item, StateCanceled, reason)
+		s.finishLocked(item, StateCanceled, "", reason)
 	}
 	for id, subscriber := range s.subscribers {
 		delete(s.subscribers, id)
@@ -261,6 +355,36 @@ func (s *Store) recentLocked() []Approval {
 	return approvals
 }
 
+func (s *Store) grantsLocked() []SessionGrant {
+	grants := make([]SessionGrant, 0, len(s.grants))
+	for _, grant := range s.grants {
+		grant.Args = append([]string(nil), grant.Args...)
+		grants = append(grants, grant)
+	}
+	sort.Slice(grants, func(i, j int) bool {
+		return grants[i].CreatedAt.Before(grants[j].CreatedAt)
+	})
+	return grants
+}
+
+func (s *Store) evictOldestGrantLocked() {
+	oldestKey := ""
+	var oldest time.Time
+	for key, grant := range s.grants {
+		if oldestKey == "" || grant.CreatedAt.Before(oldest) {
+			oldestKey, oldest = key, grant.CreatedAt
+		}
+	}
+	delete(s.grants, oldestKey)
+}
+
+// grantKey identifies the exact request a session grant releases. Quoting
+// keeps field and argument boundaries unambiguous.
+func grantKey(request CommandRequest) string {
+	return fmt.Sprintf("%q %q %q %q %q",
+		request.SessionID, request.Command, request.Caller, request.InterceptRule, request.Args)
+}
+
 func (s *Store) add(envelope WebhookEnvelope, timeout time.Duration) (*entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -275,9 +399,6 @@ func (s *Store) add(envelope WebhookEnvelope, timeout time.Duration) (*entry, er
 	if _, exists := s.recentByID[requestID]; exists {
 		return nil, fmt.Errorf("%w: %s", ErrDuplicate, requestID)
 	}
-	if len(s.pending) >= s.maxPending {
-		return nil, ErrStoreFull
-	}
 
 	now := time.Now()
 	item := &entry{
@@ -288,6 +409,14 @@ func (s *Store) add(envelope WebhookEnvelope, timeout time.Duration) (*entry, er
 			Deadline:  now.Add(timeout),
 		},
 		done: make(chan struct{}),
+	}
+	if _, granted := s.grants[grantKey(envelope.Request)]; granted {
+		s.finishLocked(item, StateGranted, ScopeSession, "Matched session approval")
+		return item, nil
+	}
+
+	if len(s.pending) >= s.maxPending {
+		return nil, ErrStoreFull
 	}
 	s.pending[requestID] = item
 	s.publishLocked(Event{Kind: EventPending, Approval: item.approval})
@@ -301,18 +430,25 @@ func (s *Store) transition(requestID string, state State, reason string) (Resolu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	item, err := s.pendingItemLocked(requestID)
+	if err != nil {
+		return Resolution{}, err
+	}
+	return s.finishLocked(item, state, "", reason), nil
+}
+
+func (s *Store) pendingItemLocked(requestID string) (*entry, error) {
 	item, exists := s.pending[requestID]
 	if !exists {
 		if _, resolved := s.recentByID[requestID]; resolved {
-			return Resolution{}, fmt.Errorf("%w: %s", ErrAlreadyResolved, requestID)
+			return nil, fmt.Errorf("%w: %s", ErrAlreadyResolved, requestID)
 		}
-		return Resolution{}, fmt.Errorf("%w: %s", ErrNotFound, requestID)
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, requestID)
 	}
-
-	return s.finishLocked(item, state, reason), nil
+	return item, nil
 }
 
-func (s *Store) finishLocked(item *entry, state State, reason string) Resolution {
+func (s *Store) finishLocked(item *entry, state State, scope string, reason string) Resolution {
 	requestID := item.approval.Envelope.Request.RequestID
 	delete(s.pending, requestID)
 	if item.timer != nil {
@@ -321,6 +457,7 @@ func (s *Store) finishLocked(item *entry, state State, reason string) Resolution
 
 	resolution := Resolution{
 		State:      state,
+		Scope:      scope,
 		Reason:     reason,
 		ResolvedAt: time.Now(),
 	}

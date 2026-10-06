@@ -796,6 +796,19 @@ details[open] > summary::before {
   padding: var(--space-xs) var(--space-sm);
 }
 
+.grants {
+  margin-bottom: var(--space-lg);
+}
+
+.grant-item {
+  border-top: var(--stroke-thin) solid var(--history-rule);
+  padding-block: var(--space-md);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-sm);
+  align-items: start;
+}
+
 .history-foot {
   margin-top: var(--space-md);
   max-width: var(--measure-medium);

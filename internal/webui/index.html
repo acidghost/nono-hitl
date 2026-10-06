@@ -115,9 +115,10 @@
                 </div>
                 <div class="scope text-muted">
                   <div>
-                    <strong>You are approving this invocation only.</strong>Approval lets nono
-                    continue under the preconfigured child sandbox. It does not add capabilities or
-                    approve the session.
+                    <strong>Approve once covers this invocation only.</strong>Approve for session
+                    also approves later invocations with the exact same argument array from this
+                    nono session until revoked. Approval lets nono continue under the preconfigured
+                    child sandbox; it does not add capabilities.
                   </div>
                 </div>
                 <details class="technical">
@@ -142,10 +143,17 @@
                     If you do not decide, the request expires and nono denies approval.
                   </p>
                   <div class="action-row row spread">
-                    <span class="text-small text-muted">One request, no remembered grant</span>
+                    <span class="text-small text-muted">Session approvals match argv exactly</span>
                     <div class="actions row gap-small">
                       <button class="deny button-deny" id="deny" type="button" disabled>Deny</button
-                      ><button class="approve row gap-small" id="approve" type="button" disabled>
+                      ><button id="approve-session" type="button" disabled>
+                        Approve for session
+                      </button><button
+                        class="approve row gap-small"
+                        id="approve"
+                        type="button"
+                        disabled
+                      >
                         <img src="/assets/logo.svg" alt="" width="16" height="16">
                         <span>Approve once</span>
                       </button>
@@ -173,6 +181,16 @@
             </section>
           </div>
           <aside class="history" aria-labelledby="history-title">
+            <section class="grants" aria-labelledby="grants-title">
+              <div class="history-head">
+                <h2 id="grants-title">Session approvals</h2>
+                <p class="subtle text-small text-muted">
+                  Exact invocations approved for a nono session
+                </p>
+              </div>
+              <div id="grant-items"></div>
+              <p class="subtle text-small text-muted" id="grants-empty">No session approvals.</p>
+            </section>
             <div class="history-head">
               <h2 id="history-title">Recent decisions</h2>
               <p class="subtle text-small text-muted">In memory only</p>
