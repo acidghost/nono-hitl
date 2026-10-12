@@ -1,4 +1,4 @@
 [tools]
-biome = "2.5.14"
+biome = "2.5.15"
 golangci-lint = "2.14.0"
 just = "1.58.0"
