@@ -39,6 +39,7 @@
 
 // The script runs in the head; dashboard elements are available after parsing.
 document.addEventListener("DOMContentLoaded", () => {
+  const clipLength = 120;
   const $ = (id) => document.getElementById(id);
   const elements = { notifications: $("notification"), actionStatus: $("live") };
   const approvals = { pending: new Map(), recent: new Map() };
@@ -72,11 +73,24 @@ document.addEventListener("DOMContentLoaded", () => {
     return safeInline([request.command, ...args.slice(1, 3)].join(" "), 100) || "Command request";
   }
 
+  function sessionLabel(request) {
+    return safeInline(request.session_id, 40) || "unknown session";
+  }
+
+  // nono reports invocation policy labels relative to the caller's profile entry.
+  function rulePath(request) {
+    const rule = String(request.intercept_rule ?? "");
+    if (!rule.startsWith("invocation_policy.")) return rule;
+    return `commands.${request.command}.from.${request.caller}.${rule}`;
+  }
+
   // Display only: these tokens are reported argv, never executable shell text.
+  function displayArg(arg) {
+    return /^[a-zA-Z0-9_./:@#=+-]+$/.test(arg) ? arg : JSON.stringify(arg);
+  }
+
   function displayArgs(args) {
-    return (Array.isArray(args) ? args : [])
-      .map((arg) => (/^[a-zA-Z0-9_./:@#=+-]+$/.test(arg) ? arg : JSON.stringify(arg)))
-      .join(" ");
+    return (Array.isArray(args) ? args : []).map(displayArg).join(" ");
   }
 
   function setConnection(state, label) {
@@ -241,19 +255,23 @@ document.addEventListener("DOMContentLoaded", () => {
       return timestamp(right.resolution?.resolved_at) - timestamp(left.resolution?.resolved_at);
     });
     if (!selectedApproval()) selectedID = requestID(pending[0]);
-    $("pending-count").textContent = `${pending.length} waiting`;
-    $("queue-number").textContent = String(pending.length);
-    $("queue-empty").hidden = pending.length !== 0;
+    $("pending-count").textContent = String(pending.length);
     $("history-empty").hidden = recent.length !== 0;
     replaceSelectors(
       $("queue-items"),
       pending.map((approval) => {
         const button = selector(approval, "queue-item");
-        const clock = textElement("span", "queue-meta text-small text-muted", "");
-        clock.dataset.deadline = approval.deadline;
+        button.dataset.deadline = approval.deadline;
+        button.dataset.created = approval.created_at;
         button.append(
-          textElement("span", "queue-command break-anywhere", commandTitle(approval)),
-          clock,
+          element("span", "deadline-bar"),
+          textElement("span", "queue-command", commandTitle(approval)),
+          textElement("span", "clock text-small", ""),
+          textElement(
+            "span",
+            "queue-meta text-small text-muted",
+            sessionLabel(commandRequest(approval)),
+          ),
         );
         return button;
       }),
@@ -314,9 +332,103 @@ document.addEventListener("DOMContentLoaded", () => {
   function metadataItem(label, value) {
     const row = element("div", "");
     const dd = element("dd", "break-anywhere");
-    dd.append(textElement("code", "text-small pre-wrap", String(value ?? "—")));
+    dd.append(
+      value instanceof Node
+        ? value
+        : textElement("code", "text-small pre-wrap", String(value ?? "—")),
+    );
     row.append(textElement("dt", "text-small text-muted", label), dd);
     return row;
+  }
+
+  // Long arguments are clipped, never hidden: the button says how much is left out.
+  function argumentChips(arg, index) {
+    const text = displayArg(arg);
+    const characters = Array.from(text);
+    const chip = textElement("code", index === 0 ? "chip chip-command" : "chip", text);
+    if (characters.length <= clipLength) return [chip];
+    const head = `${characters.slice(0, clipLength).join("")}…`;
+    const label = `+${characters.length - clipLength} chars`;
+    const toggle = textElement("button", "chip-toggle text-small", label);
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => {
+      const expanded = toggle.getAttribute("aria-expanded") === "true";
+      chip.textContent = expanded ? head : text;
+      toggle.textContent = expanded ? label : "Show less";
+      toggle.setAttribute("aria-expanded", String(!expanded));
+    });
+    chip.textContent = head;
+    return [chip, toggle];
+  }
+
+  function argumentTable(args) {
+    const table = element("table", "argv-table");
+    table.setAttribute("aria-label", "Argument array, JSON-escaped values");
+    table.append(
+      ...args.map((arg, index) => {
+        const row = element("tr", "");
+        const th = textElement("th", "text-muted", `argv[${index}]`);
+        th.scope = "row";
+        const td = element("td", "");
+        td.append(textElement("code", "pre-wrap", JSON.stringify(arg)));
+        row.append(th, td);
+        return row;
+      }),
+    );
+    return table;
+  }
+
+  // Only what differs from a plain agent request reaching the default rule.
+  function exceptionLines(request) {
+    const lines = [];
+    if (request.caller !== "session") {
+      const line = element("p", "break-anywhere");
+      line.append(
+        "Launched by ",
+        textElement("code", "", safeInline(request.caller, 100)),
+        ", not directly by the agent.",
+      );
+      lines.push(line);
+    }
+    if (request.reason) {
+      lines.push(
+        textElement("p", "exception-reason break-anywhere", safeInline(request.reason, 300)),
+      );
+    }
+    if (request.reason || request.intercept_rule !== "invocation_policy.default") {
+      const line = element("p", "text-small break-anywhere");
+      line.append("Matched ", textElement("code", "", rulePath(request)));
+      lines.push(line);
+    }
+    return lines;
+  }
+
+  // Request content never changes, so it is only rebuilt when another request is shown.
+  function renderRequest(approval) {
+    const request = commandRequest(approval);
+    const args = Array.isArray(request.args) ? request.args : [];
+    $("details").open = false;
+    $("request-title").textContent = commandTitle(approval);
+    $("session").textContent = sessionLabel(request);
+    $("scope").textContent = `Session approval covers this exact argv in ${sessionLabel(request)}`;
+    $("command").replaceChildren(...args.flatMap(argumentChips));
+    const exception = exceptionLines(request);
+    $("exception").replaceChildren(...exception);
+    $("exception").hidden = exception.length === 0;
+    $("technical-data").replaceChildren(
+      metadataItem("Arguments", argumentTable(args)),
+      metadataItem("Command", JSON.stringify(request.command)),
+      metadataItem("Caller", request.caller),
+      metadataItem("Rule", rulePath(request)),
+      metadataItem("Reason", request.reason || "—"),
+      metadataItem("Session ID", request.session_id),
+      metadataItem("Request ID", requestID(approval)),
+      metadataItem("Shim PID", request.child_pid),
+      metadataItem("Backend", approval.envelope?.backend),
+      metadataItem("Received", approval.created_at),
+      metadataItem("Deadline", approval.deadline),
+    );
   }
 
   function renderSheet(approval) {
@@ -328,62 +440,28 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const id = requestID(approval);
     if (id !== renderedID) {
-      $("sheet")
-        .querySelectorAll("details")
-        .forEach((details) => {
-          details.open = false;
-        });
+      renderRequest(approval);
       renderedID = id;
     }
-    const request = commandRequest(approval);
     const waiting = approval.state === "pending";
-    const args = Array.isArray(request.args) ? request.args : [];
-    $("sheet").dataset.state = approval.state;
-    $("sheet").setAttribute("aria-busy", String(sending.has(id)));
-    $("request-kind").textContent = waiting ? "Command approval" : "Resolved command request";
-    $("request-title").textContent = commandTitle(approval);
-    $("command").textContent = displayArgs(args);
-    $("argv-count").textContent = `Argument array (${args.length} entries)`;
-    $("argv-body").replaceChildren(
-      ...args.map((arg, index) => {
-        const row = element("tr", "");
-        const th = textElement("th", "text-muted", `argv[${index}]`);
-        th.scope = "row";
-        const td = element("td", "");
-        td.append(textElement("code", "pre-wrap", JSON.stringify(arg)));
-        row.append(th, td);
-        return row;
-      }),
-    );
-    $("caller").textContent = request.caller ?? "—";
-    $("caller-help").textContent =
-      request.caller === "session"
-        ? "Caller is the sandboxed session."
-        : "Reported caller label; not proof of safety.";
-    $("rule").textContent = request.intercept_rule ?? "—";
-    $("rule-help").textContent =
-      request.intercept_rule === "invocation_policy.default"
-        ? "Default invocation policy requires approval."
-        : "Reported rule label; inspect the effective profile.";
-    $("reason").textContent = request.reason || "No reason supplied.";
-    $("technical-data").replaceChildren(
-      metadataItem("Command", JSON.stringify(request.command)),
-      metadataItem("Request ID", id),
-      metadataItem("Session ID", request.session_id),
-      metadataItem("Shim PID", request.child_pid),
-      metadataItem("Backend", approval.envelope?.backend),
-      metadataItem("Received", approval.created_at),
-      metadataItem("Deadline", approval.deadline),
-    );
+    const sheet = $("sheet");
+    sheet.dataset.state = approval.state;
+    sheet.setAttribute("aria-busy", String(sending.has(id)));
+    if (waiting) {
+      sheet.dataset.deadline = approval.deadline;
+      sheet.dataset.created = approval.created_at;
+    } else {
+      delete sheet.dataset.deadline;
+      delete sheet.dataset.created;
+      sheet.classList.remove("urgent");
+      $("clock").textContent =
+        `${stateLabel(approval.state)} ${shortTime(approval.resolution?.resolved_at)}`;
+    }
     $("pending-actions").hidden = !waiting;
     $("terminal").hidden = waiting;
     $("decision-feedback").textContent = feedback.get(id) ?? "";
-    $("clock-label").textContent = waiting
-      ? "Denies at deadline"
-      : `Resolved ${shortTime(approval.resolution?.resolved_at)}`;
     if (!waiting) {
-      $("clock-value").textContent = stateLabel(approval.state);
-      $("stamp").className = `stamp text-display ${approval.state}`;
+      $("stamp").className = `stamp ${approval.state}`;
       $("stamp").textContent = stateLabel(approval.state);
       const session = approval.resolution?.scope === "session";
       $("terminal-title").textContent =
@@ -393,15 +471,6 @@ document.addEventListener("DOMContentLoaded", () => {
             ? "Approval granted for this nono session."
             : "Approval granted for this invocation.";
       $("terminal-reason").textContent = approval.resolution?.reason ?? "";
-      $("terminal-note").textContent =
-        {
-          granted: session
-            ? "Identical invocations in this nono session run without asking until revoked."
-            : "Execution result is not reported by nono.",
-          denied: "Denying this invocation does not change the profile.",
-          expired: "The deadline passed without a grant; nono receives a denial.",
-          canceled: "The webhook caller disconnected; this request received no grant.",
-        }[approval.state] ?? "No approval can be given to a resolved request.";
     }
   }
 
@@ -472,18 +541,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // Tabs and the card carry their deadline; the bar drains and the clock counts down.
   function updateTimes() {
     const now = Date.now();
     document.querySelectorAll("[data-deadline]").forEach((item) => {
-      item.textContent = `${duration(Math.max(0, timestamp(item.dataset.deadline) - now))} remaining`;
+      const deadline = timestamp(item.dataset.deadline);
+      const remaining = Math.max(0, deadline - now);
+      const total = deadline - timestamp(item.dataset.created);
+      const left = total > 0 ? Math.min(1, remaining / total) : 0;
+      item.style.setProperty("--left", String(left));
+      item.classList.toggle("urgent", remaining <= 10000);
+      const clock = item.querySelector(".clock");
+      if (clock) clock.textContent = duration(remaining);
     });
     const approval = selectedApproval();
-    const waiting = approval?.state === "pending";
-    const remaining = timestamp(approval?.deadline) - now;
-    $("sheet")
-      .querySelector(".clock")
-      .classList.toggle("clock-urgent", waiting && remaining <= 10000);
-    if (waiting) $("clock-value").textContent = `${duration(Math.max(0, remaining))} remaining`;
     $("approve").disabled = !canDecide(approval);
     $("approve-session").disabled = !canDecide(approval);
     $("deny").disabled = !canDecide(approval);
@@ -513,11 +584,7 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
   function configureNotifications() {
-    if (!("Notification" in window)) {
-      elements.notifications.textContent = "Notifications unavailable";
-      elements.notifications.disabled = true;
-      return;
-    }
+    if (!("Notification" in window)) return;
     updateNotificationButton();
     elements.notifications.addEventListener("click", async () => {
       try {
@@ -529,11 +596,11 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // The button only shows while there is something to do or to know.
   function updateNotificationButton() {
+    elements.notifications.hidden = Notification.permission === "granted";
     switch (Notification.permission) {
       case "granted":
-        elements.notifications.textContent = "Notifications enabled";
-        elements.notifications.disabled = true;
         break;
       case "denied":
         elements.notifications.textContent = "Notifications blocked";
@@ -640,6 +707,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   $("listener").textContent = window.location.host;
+  $("help-open").addEventListener("click", () => $("help").showModal());
+  $("help-close").addEventListener("click", () => $("help").close());
   $("approve").addEventListener("click", () => void decide("granted"));
   $("approve-session").addEventListener("click", () => void decide("granted", "session"));
   $("deny").addEventListener("click", () => void decide("denied"));

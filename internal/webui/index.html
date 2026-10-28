@@ -13,203 +13,135 @@
   <body>
     <a class="skip" href="#review">Skip to request</a>
     <div class="app">
-      <header class="masthead row spread">
-        <div class="brand row">
-          <img src="/assets/logo.svg" alt="" width="48" height="48">
-          <div>
-            <p class="brand-name text-display">nono / hitl</p>
-            <p class="brand-caption text-small text-muted">Local command approvals</p>
-          </div>
-        </div>
-        <div class="service row">
+      <header class="topbar row">
+        <p class="brand row gap-small">
+          <img src="/assets/logo.svg" alt="" width="24" height="24">
+          <span>nono / hitl</span>
+        </p>
+        <div class="status row text-small text-muted">
           <p id="connection" class="connection row gap-small" data-state="connecting" role="status">
             <span class="dot" aria-hidden="true"></span
             ><span id="connection-label">Connecting</span>
           </p>
-          <label class="theme-picker row gap-small text-small text-muted" for="color-theme"
-            >Theme
-            <select id="color-theme">
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select></label
-          ><button class="quiet text-small" id="notification" type="button">
-            Enable notifications
+          <p><span class="badge" id="pending-count">0</span> waiting</p>
+          <button class="quiet" id="notification" type="button" hidden>Enable notifications</button>
+          <button
+            class="help-button"
+            id="help-open"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="help"
+            title="Help"
+          >
+            ?
           </button>
         </div>
       </header>
-      <main>
-        <div class="intro row spread">
-          <div>
-            <h1>Waiting for your decision</h1>
-            <p class="text-muted">Review each invocation before it runs.</p>
-          </div>
-          <p class="queue-count text-muted" id="pending-count">0 waiting</p>
-        </div>
-        <div class="workspace" id="workspace">
-          <div class="review-column">
-            <section class="queue" aria-labelledby="queue-title">
-              <div class="queue-head">
-                <h2 id="queue-title">Waiting requests</h2>
-                <span class="subtle text-small text-muted" id="queue-number">0</span>
-              </div>
-              <div id="queue-items" class="queue-items"></div>
-              <p class="queue-empty text-muted" id="queue-empty">
-                No commands are waiting. New requests appear here.
+      <main class="workspace" id="workspace">
+        <div class="review-column">
+          <p id="offline-banner" class="offline-banner" role="status" hidden>
+            Connection lost. Decisions are disabled until the request state is reconciled. Requests
+            still deny at their deadlines.
+          </p>
+          <nav id="queue-items" class="queue-items" aria-label="Waiting requests"></nav>
+          <section class="sheet" id="sheet" hidden aria-labelledby="request-title">
+            <div class="deadline-bar" aria-hidden="true"></div>
+            <div class="sheet-body" id="review" tabindex="-1">
+              <h2 class="sr-only" id="request-title">Command request</h2>
+              <p class="who row text-muted">
+                <span>Session</span><strong id="session"></strong
+                ><span class="clock" id="clock"></span>
               </p>
-            </section>
-            <p id="offline-banner" class="offline-banner" role="status" hidden>
-              Connection lost. Decisions are disabled until the request state is reconciled.
-              Requests still deny at their deadlines.
-            </p>
-            <section class="sheet" id="sheet" hidden aria-labelledby="request-title">
-              <header class="sheet-top row spread">
-                <p class="request-kind">
-                  <span class="state-dot" aria-hidden="true"></span
-                  ><span id="request-kind">Command approval</span>
-                </p>
-                <p class="clock text-small text-muted">
-                  <strong class="text-heading" id="clock-value">—</strong
-                  ><span id="clock-label">Denies at deadline</span>
-                </p>
-              </header>
-              <div class="sheet-body" id="review" tabindex="-1">
-                <h2 class="request-title text-display break-anywhere" id="request-title">
-                  Command request
-                </h2>
-                <pre class="command-display break-anywhere pre-wrap" id="command"></pre>
-                <p class="command-hint text-small text-muted">
-                  Reported arguments, not a shell command. Inspect the array for exact entries.
-                </p>
-                <details class="argv">
-                  <summary class="row gap-small" id="argv-count">Argument array</summary>
-                  <table
-                    class="argv-table text-small"
-                    aria-label="Argument array, JSON-escaped values"
-                  >
-                    <tbody id="argv-body"></tbody>
-                  </table>
-                  <p class="command-hint text-small text-muted">
-                    JSON escaping makes whitespace and empty arguments visible. Includes argv[0].
-                  </p>
-                </details>
-                <dl class="context">
-                  <div>
-                    <dt class="text-small text-muted">Requested by</dt>
-                    <dd class="break-anywhere">
-                      <code id="caller"></code
-                      ><small class="text-small text-muted" id="caller-help"></small>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt class="text-small text-muted">Approval rule</dt>
-                    <dd class="break-anywhere">
-                      <code id="rule"></code
-                      ><small class="text-small text-muted" id="rule-help"></small>
-                    </dd>
-                  </div>
-                </dl>
-                <div class="reason">
-                  <h3 class="text-small text-muted">Reported reason</h3>
-                  <p class="break-anywhere pre-wrap" id="reason"></p>
-                </div>
-                <div class="scope text-muted">
-                  <div>
-                    <strong>Approve once covers this invocation only.</strong>Approve for session
-                    also approves later invocations with the exact same argument array from this
-                    nono session until revoked. Approval lets nono continue under the preconfigured
-                    child sandbox; it does not add capabilities.
-                  </div>
-                </div>
-                <details class="technical">
-                  <summary class="row gap-small">Request details</summary>
-                  <dl class="tech-grid" id="technical-data"></dl>
-                  <p class="unknown text-small text-muted">
-                    <strong>Child permissions are not included.</strong>
-                    This request does not contain filesystem grants, network routes, credentials, or
-                    the working directory. Review the effective nono profile for that scope. Request
-                    metadata is not proof of safety.
-                  </p>
-                </details>
-              </div>
-              <div class="decision-area">
-                <div id="pending-actions">
-                  <p
-                    id="decision-feedback"
-                    class="decision-feedback break-anywhere pre-wrap"
-                    role="status"
-                  ></p>
-                  <p class="decision-copy text-small text-muted">
-                    If you do not decide, the request expires and nono denies approval.
-                  </p>
-                  <div class="action-row row spread">
-                    <span class="text-small text-muted">Session approvals match argv exactly</span>
-                    <div class="actions row gap-small">
-                      <button class="deny button-deny" id="deny" type="button" disabled>Deny</button
-                      ><button id="approve-session" type="button" disabled>
-                        Approve for session
-                      </button><button
-                        class="approve row gap-small"
-                        id="approve"
-                        type="button"
-                        disabled
-                      >
-                        <img src="/assets/logo.svg" alt="" width="16" height="16">
-                        <span>Approve once</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div id="terminal" class="terminal row spread" hidden>
-                  <div>
-                    <h3 class="text-body" id="terminal-title">Resolved command request</h3>
-                    <p
-                      class="text-small text-muted break-anywhere pre-wrap"
-                      id="terminal-reason"
-                    ></p>
-                    <p class="text-small text-muted break-anywhere pre-wrap" id="terminal-note"></p>
-                  </div>
-                  <div class="stamp text-display" id="stamp"></div>
-                </div>
-              </div>
-            </section>
-            <section class="sheet empty-sheet" id="empty-sheet">
-              <h2>No commands are waiting</h2>
-              <p class="text-muted">
-                Keep this page open to review new requests. Missing a request never grants approval.
-              </p>
-            </section>
-          </div>
-          <aside class="history" aria-labelledby="history-title">
-            <section class="grants" aria-labelledby="grants-title">
-              <div class="history-head">
-                <h2 id="grants-title">Session approvals</h2>
-                <p class="subtle text-small text-muted">
-                  Exact invocations approved for a nono session
-                </p>
-              </div>
-              <div id="grant-items"></div>
-              <p class="subtle text-small text-muted" id="grants-empty">No session approvals.</p>
-            </section>
-            <div class="history-head">
-              <h2 id="history-title">Recent decisions</h2>
-              <p class="subtle text-small text-muted">In memory only</p>
+              <div class="argv-chips" id="command"></div>
+              <div class="exception" id="exception" hidden></div>
             </div>
-            <div id="history-items"></div>
-            <p class="subtle text-small text-muted" id="history-empty">No recent decisions.</p>
-            <p class="history-foot text-small text-muted">
-              History is bounded and cleared when the service restarts; not a durable audit log.
+            <div class="decision-area">
+              <div id="pending-actions">
+                <p
+                  id="decision-feedback"
+                  class="decision-feedback break-anywhere pre-wrap"
+                  role="status"
+                ></p>
+                <div class="action-row row">
+                  <span class="scope text-small text-muted" id="scope"></span>
+                  <div class="actions row gap-small">
+                    <button class="deny button-deny" id="deny" type="button" disabled>Deny</button
+                    ><button id="approve-session" type="button" disabled>Approve for session</button
+                    ><button class="approve row gap-small" id="approve" type="button" disabled>
+                      <img src="/assets/logo.svg" alt="" width="16" height="16">
+                      <span>Approve once</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div id="terminal" class="terminal row spread" hidden>
+                <div>
+                  <h3 class="text-body" id="terminal-title">Resolved command request</h3>
+                  <p class="text-small text-muted break-anywhere pre-wrap" id="terminal-reason"></p>
+                </div>
+                <div class="stamp" id="stamp"></div>
+              </div>
+            </div>
+            <details class="technical" id="details">
+              <summary class="row gap-small">Details</summary>
+              <dl class="tech-grid" id="technical-data"></dl>
+              <p class="text-small text-muted">
+                The request doesn't include the child's filesystem, network or credential grants.
+                Those live in the nono profile.
+              </p>
+            </details>
+          </section>
+          <section class="sheet empty-sheet" id="empty-sheet">
+            <h2>Nothing is waiting</h2>
+            <p class="text-muted">
+              New requests show up here and as a notification. Unanswered requests are denied at
+              their deadline.
             </p>
-          </aside>
+          </section>
         </div>
+        <aside class="history" aria-labelledby="history-title">
+          <section class="grants" aria-labelledby="grants-title">
+            <h2 class="history-head" id="grants-title">Session approvals</h2>
+            <div id="grant-items"></div>
+            <p class="text-small text-muted" id="grants-empty">None yet.</p>
+          </section>
+          <h2 class="history-head" id="history-title">Recent decisions</h2>
+          <div id="history-items"></div>
+          <p class="text-small text-muted" id="history-empty">None yet.</p>
+        </aside>
       </main>
-      <footer class="footer text-small text-muted">
-        <p>
-          Local listener <code id="listener">127.0.0.1</code>. Run this service outside the agent
-          sandbox.
-        </p>
-      </footer>
     </div>
+    <dialog class="help" id="help" aria-labelledby="help-title">
+      <div class="help-head row spread">
+        <h2 id="help-title">Help</h2>
+        <button class="quiet" id="help-close" type="button">Close</button>
+      </div>
+      <ul class="help-notes">
+        <li>Unanswered requests are denied at their deadline. Missing one never approves it.</li>
+        <li>
+          Approve once covers this invocation only. Approve for session also covers later requests
+          from the same nono session with exactly the same command, argument array, caller and rule,
+          until you revoke it.
+        </li>
+        <li>
+          Approving lets nono run the command in the child sandbox set by the profile. It adds no
+          permissions.
+        </li>
+        <li>Decisions are kept in memory and cleared when the service restarts.</li>
+        <li>
+          Listening on <code id="listener">127.0.0.1</code>. Run this service outside the agent
+          sandbox.
+        </li>
+      </ul>
+      <label class="theme-picker row gap-small" for="color-theme"
+        >Theme
+        <select id="color-theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select></label
+      >
+    </dialog>
     <div id="live" class="sr-only" role="status" aria-live="polite"></div>
   </body>
 </html>

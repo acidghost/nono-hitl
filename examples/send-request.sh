@@ -1,6 +1,7 @@
 #!/bin/sh
 # Sends a fake nono command approval request and prints the decision.
 # Usage: send-request.sh gh pr create --fill
+# SESSION_ID, CALLER, RULE and REASON override the reported request fields.
 set -eu
 
 if [ $# -eq 0 ]; then
@@ -11,6 +12,9 @@ fi
 body=$(jq -n \
     --arg id "dev-$(date +%s)-$$" \
     --arg session "${SESSION_ID:-dev-session}" \
+    --arg caller "${CALLER:-session}" \
+    --arg rule "${RULE:-invocation_policy.default}" \
+    --arg reason "${REASON:-}" \
     '{
         backend: "nono-hitl",
         request: {
@@ -18,8 +22,9 @@ body=$(jq -n \
             request_id: $id,
             command: $ARGS.positional[0],
             args: $ARGS.positional,
-            caller: "session",
-            intercept_rule: "invocation_policy.default",
+            caller: $caller,
+            intercept_rule: $rule,
+            reason: (if $reason == "" then null else $reason end),
             child_pid: 1,
             session_id: $session
         }

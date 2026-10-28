@@ -2,7 +2,7 @@
  * Internal UI scale: four spacing steps, four type sizes, three weights.
  * Reuse these steps rather than adding a token for each component's old value.
  * Structural widths, touch targets and accessibility geometry are the exceptions.
- * Breakpoints: 64rem (compact desk), 48rem (header wrap), 40rem (single column).
+ * Breakpoints: 64rem (compact desk), 40rem (single column).
  */
 :root {
   --space-xs: 0.25rem;
@@ -29,8 +29,8 @@
   --page-width: 80rem;
   --sidebar-width: 16rem;
   --label-width: 6rem;
-  /* A single 48px minimum target for buttons, selects and disclosure rows. */
-  --control-size: 3rem;
+  /* A single 36px minimum target for buttons, selects and disclosure rows, above WCAG's 24px. */
+  --control-size: 2.25rem;
   --stroke-thin: 1px;
   --stroke-strong: 2px;
   --disabled-opacity: 0.5;
@@ -57,6 +57,7 @@
   --danger: #8a3849;
   --danger-rule: #b99397;
   --warning: #725017;
+  --warning-bg: #fbf0d6;
   --offline-bg: #f5e9ec;
   --offline-text: #78383d;
   --focus: var(--selected-ink);
@@ -83,6 +84,7 @@
   --danger: #ffb8c8;
   --danger-rule: #c490a0;
   --warning: #f1d49c;
+  --warning-bg: #3a3a21;
   --offline-bg: #512b37;
   --offline-text: #ffdae5;
   --focus: var(--selected-bg);
@@ -252,7 +254,7 @@ code {
   --outcome-color: var(--muted);
 }
 
-/* Desk and service header. */
+/* Top bar: brand, connection and queue size in one row. */
 .skip {
   position: absolute;
   left: var(--space-md);
@@ -272,34 +274,44 @@ code {
   max-width: var(--page-width);
   margin: 0 auto;
   padding-inline: var(--app-inset);
+  padding-bottom: var(--space-lg);
 }
 
-.masthead {
-  padding-block: var(--space-lg);
+.topbar {
+  flex-wrap: wrap;
+  min-height: var(--space-lg);
+  padding-block: var(--space-sm);
+  margin-bottom: var(--space-md);
   border-bottom: var(--stroke-strong) solid var(--ink);
 }
 
 .brand {
-  --brand-size: var(--control-size);
+  font-size: var(--text-body);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-heading);
+  white-space: nowrap;
 }
 
 .brand img {
-  width: var(--brand-size);
-  height: var(--brand-size);
+  width: calc(var(--space-lg) * 0.75);
+  height: calc(var(--space-lg) * 0.75);
   flex: none;
 }
 
-.brand-name {
-  font-weight: var(--weight-bold);
-}
-
-.brand-caption {
-  margin-top: var(--space-xs);
-}
-
-.service {
+.status {
   flex-wrap: wrap;
-  justify-content: flex-end;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-block;
+  min-width: calc(var(--space-md) * 1.25);
+  padding-inline: var(--space-xs);
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: var(--weight-bold);
+  text-align: center;
 }
 
 .dot,
@@ -325,7 +337,7 @@ code {
 .quiet,
 .theme-picker select {
   border: var(--stroke-thin) solid var(--rule);
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
 }
 
 .quiet {
@@ -334,6 +346,14 @@ code {
 
 .quiet:hover:not(:disabled) {
   background: var(--wash);
+}
+
+.help-button {
+  width: var(--control-size);
+  border: var(--stroke-thin) solid var(--rule);
+  background: transparent;
+  color: var(--text);
+  font-weight: var(--weight-bold);
 }
 
 .theme-picker {
@@ -347,23 +367,6 @@ code {
   cursor: pointer;
 }
 
-.intro {
-  padding-block: var(--space-lg);
-}
-
-.intro h1 {
-  max-width: var(--measure-medium);
-}
-
-.intro p {
-  margin-top: var(--space-sm);
-}
-
-.queue-count {
-  font-weight: var(--weight-medium);
-  white-space: nowrap;
-}
-
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
@@ -375,55 +378,47 @@ code {
   min-width: 0;
 }
 
-/* Filing tabs. */
-.queue {
-  margin-bottom: var(--space-md);
-}
-
-.queue-head {
-  display: none;
-}
-
+/* Filing tabs sit directly on the card, each with its own draining deadline bar. */
 .queue-items {
   display: flex;
-  border-bottom: var(--stroke-strong) solid var(--ink);
+  gap: var(--space-xs);
   overflow-x: auto;
 }
 
-.queue-items:empty {
-  border: 0;
-}
-
 .queue-item {
-  min-width: calc(var(--sidebar-width) / 2);
-  flex: 1;
+  position: relative;
+  flex: 0 1 15rem;
+  min-width: 11rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--space-sm);
+  align-items: baseline;
+  padding: var(--space-sm);
   text-align: left;
+  background: var(--queue-bg);
   border: var(--stroke-thin) solid var(--rule);
   border-bottom: 0;
-  background: var(--queue-bg);
-  padding: var(--space-md);
 }
 
 .queue-item[aria-pressed="true"] {
   background: var(--selected-bg);
   color: var(--selected-ink);
-  border-width: var(--stroke-strong);
   border-color: var(--ink);
 }
 
-.queue-command,
-.history-command {
-  display: block;
-  font-weight: var(--weight-medium);
+.queue-command {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-weight: var(--weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.queue-item[aria-pressed="true"] .queue-command {
-  text-decoration-thickness: var(--stroke-strong);
-}
-
-.queue-item .queue-meta {
-  display: block;
-  margin-top: var(--space-xs);
+.queue-meta {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .queue-item[aria-pressed="true"] .queue-meta {
@@ -439,237 +434,139 @@ code {
   outline-color: var(--selected-ink);
 }
 
-.queue-empty {
-  padding: var(--space-md);
-  border: var(--stroke-thin) solid var(--rule);
+.clock {
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
 }
 
-/* Request sheet: one shared inset for its header, body and decision band. */
+.deadline-bar {
+  height: var(--space-xs);
+  background: var(--wash);
+}
+
+.queue-item .deadline-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  background: none;
+}
+
+.deadline-bar::before {
+  content: "";
+  display: block;
+  height: 100%;
+  width: calc(var(--left, 1) * 100%);
+  background: var(--stack);
+}
+
+.urgent .deadline-bar::before {
+  background: var(--warning);
+}
+
+/* Request card: session line, argv, exceptions, decision, then details. */
 .sheet {
-  --sheet-inset: var(--space-lg);
+  --sheet-inset: var(--space-md);
   background: var(--paper);
   border: var(--stroke-thin) solid var(--ink);
   box-shadow: var(--raised-shadow);
-  overflow: hidden;
 }
 
-.sheet-top {
-  padding: var(--space-md) var(--sheet-inset);
-  border-bottom: var(--stroke-strong) solid var(--ink);
-}
-
-.request-kind {
-  font-weight: var(--weight-medium);
-  border-left: var(--stroke-strong) solid var(--rule);
-  padding-left: var(--space-sm);
-}
-
-.state-dot {
-  display: inline-block;
-  margin-right: var(--space-sm);
-  background: var(--outcome-color, var(--warning));
-}
-
-.clock {
-  text-align: right;
-  border: var(--stroke-thin) solid var(--rule);
-  padding: var(--space-sm);
-  background: var(--wash);
-}
-
-.clock strong {
-  color: var(--warning);
-  font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
-  display: block;
-}
-
-.clock-urgent strong {
-  color: var(--danger);
+.sheet:not([data-state="pending"]) .deadline-bar {
+  visibility: hidden;
 }
 
 .sheet-body {
-  padding: var(--sheet-inset);
+  padding: var(--space-sm) var(--sheet-inset) 0;
 }
 
-.request-title {
-  margin-bottom: var(--space-md);
+.who {
+  --row-gap: var(--space-sm);
+  flex-wrap: wrap;
+  align-items: baseline;
 }
 
-.command-display {
-  padding: var(--space-md);
-  background: var(--paper);
-  border: var(--stroke-thin) solid var(--sheet-rule);
-  border-bottom: var(--stroke-strong) solid var(--ink);
-  margin: 0;
-  line-height: var(--leading-body);
+.who strong {
+  color: var(--text);
 }
 
-.command-hint,
-.reason p,
-.scope,
-.unknown,
-.decision-copy,
-.footer p,
-.empty-sheet p {
-  max-width: var(--measure-long);
+.who .clock {
+  margin-left: auto;
+  color: var(--text);
 }
 
-.command-hint {
-  margin-top: var(--space-sm);
+.sheet.urgent .who .clock {
+  color: var(--warning);
 }
 
-.argv {
-  margin-top: var(--space-md);
+.argv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-block: var(--space-sm) var(--space-md);
+  font-family: var(--mono);
 }
 
-.argv summary,
-.technical summary {
-  cursor: pointer;
-  list-style: none;
-  width: 100%;
-  padding-block: var(--space-sm);
-  border-block: var(--stroke-thin) solid var(--sheet-rule);
-}
-
-summary::-webkit-details-marker {
-  display: none;
-}
-
-.argv summary::before,
-.technical summary::before {
-  content: "+";
-  font-size: var(--text-heading);
-  line-height: var(--leading-heading);
-  width: var(--space-md);
-  color: var(--ink);
-  flex: none;
-}
-
-details[open] > summary::before {
-  content: "−";
-}
-
-.argv-table {
-  margin-top: var(--space-md);
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.argv-table th,
-.argv-table td {
-  text-align: left;
-  vertical-align: top;
-  padding-block: var(--space-sm);
-  border-bottom: var(--stroke-thin) solid var(--sheet-rule);
-}
-
-.argv-table th {
-  width: var(--label-width);
-  font-weight: var(--weight-normal);
-}
-
-/* Context uses the sole weighted field ratio, 1:2; metadata uses a fixed label rail. */
-.context {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: var(--space-md);
-  margin: var(--space-lg) 0 0;
-}
-
-.context > div {
-  min-width: 0;
-  border: var(--stroke-thin) solid var(--sheet-rule);
-}
-
-.context dt,
-.tech-grid dt {
-  margin: 0 0 var(--space-xs);
-}
-
-.context dt {
+.chip {
+  padding: var(--space-xs) var(--space-sm);
   background: var(--wash);
-  padding: var(--space-sm);
-  margin: 0;
-  border-bottom: var(--stroke-thin) solid var(--sheet-rule);
+  border: var(--stroke-thin) solid var(--sheet-rule);
+  white-space: pre-wrap;
 }
 
-.context dd,
-.tech-grid dd {
-  margin: 0;
+.chip-command {
+  font-weight: var(--weight-bold);
+  border-color: var(--ink);
 }
 
-.context dd {
-  padding: var(--space-sm);
+.chip-toggle {
+  min-height: 0;
+  padding: var(--space-xs) var(--space-sm);
+  background: transparent;
+  border: var(--stroke-thin) dashed var(--rule);
+  color: var(--muted);
+  font-family: var(--sans);
 }
 
-.context dd small {
-  display: block;
-  margin-top: var(--space-sm);
-}
-
-.reason {
-  margin-top: var(--space-md);
-  padding-top: var(--space-md);
-  border-top: var(--stroke-thin) solid var(--sheet-rule);
-}
-
-.reason h3 {
-  font-weight: var(--weight-normal);
-  letter-spacing: normal;
-  margin-bottom: var(--space-sm);
-}
-
-.scope {
-  padding-block: var(--space-md);
-  margin-block: var(--space-lg);
-  border-block: var(--stroke-thin) solid var(--rule);
-}
-
-.scope strong {
-  color: var(--text);
-  display: block;
-  margin-bottom: var(--space-xs);
-}
-
-.tech-grid {
+.exception {
   display: grid;
-  gap: var(--space-md);
-  margin: var(--space-md) 0 0;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--warning-bg);
+  border-left: var(--stroke-strong) solid var(--warning);
 }
 
-.tech-grid > div {
-  display: grid;
-  grid-template-columns: var(--label-width) minmax(0, 1fr);
-  gap: var(--space-md);
-}
-
-.unknown {
-  margin: var(--space-md) 0 0;
-}
-
-.unknown strong {
-  color: var(--text);
+.exception-reason {
+  font-weight: var(--weight-bold);
 }
 
 /* Decisions and their form imprints. */
 .decision-area {
   border-top: var(--stroke-thin) dashed var(--rule);
-  padding: var(--space-md) var(--sheet-inset);
-}
-
-.decision-copy,
-.decision-feedback:not(:empty) {
-  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--sheet-inset);
 }
 
 .decision-feedback {
   color: var(--danger);
 }
 
+.decision-feedback:not(:empty) {
+  margin-bottom: var(--space-sm);
+}
+
+.action-row {
+  --row-gap: var(--space-sm) var(--space-md);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.scope {
+  flex: 1 1 12rem;
+}
+
 .actions button {
-  padding: var(--space-sm) var(--space-md);
-  font-weight: var(--weight-medium);
+  padding: 0 var(--space-md);
+  font-weight: var(--weight-bold);
   border: var(--stroke-strong) solid var(--rule);
   background: var(--paper);
 }
@@ -707,28 +604,94 @@ details[open] > summary::before {
 }
 
 .terminal p {
-  margin-top: var(--space-sm);
+  margin-top: var(--space-xs);
 }
 
 .stamp,
 .mini-stamp {
   color: var(--outcome-color, var(--approved));
-  font-weight: var(--weight-medium);
+  font-weight: var(--weight-bold);
 }
 
 .stamp {
   flex: none;
   border: var(--stroke-strong) solid currentColor;
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
   position: relative;
 }
 
 .stamp::before {
   content: "";
   position: absolute;
-  inset: var(--space-xs);
+  inset: calc(var(--space-xs) / 2);
   border: var(--stroke-thin) solid currentColor;
   pointer-events: none;
+}
+
+/* Details drawer: everything the card leaves out. */
+.technical {
+  padding-inline: var(--sheet-inset);
+  border-top: var(--stroke-thin) solid var(--sheet-rule);
+}
+
+.technical[open] {
+  padding-bottom: var(--sheet-inset);
+}
+
+.technical summary {
+  cursor: pointer;
+  list-style: none;
+  width: 100%;
+  color: var(--muted);
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+.technical summary::before {
+  content: "+";
+  width: var(--space-md);
+  color: var(--ink);
+  font-weight: var(--weight-bold);
+  flex: none;
+}
+
+details[open] > summary::before {
+  content: "−";
+}
+
+.tech-grid {
+  display: grid;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-md);
+}
+
+.tech-grid > div {
+  display: grid;
+  grid-template-columns: var(--label-width) minmax(0, 1fr);
+  gap: var(--space-md);
+}
+
+.tech-grid dd {
+  margin: 0;
+}
+
+.argv-table {
+  border-collapse: collapse;
+  font-size: var(--text-small);
+}
+
+.argv-table th,
+.argv-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0 var(--space-md) var(--space-xs) 0;
+}
+
+.argv-table th {
+  font-weight: var(--weight-normal);
+  white-space: nowrap;
 }
 
 .offline-banner {
@@ -739,7 +702,19 @@ details[open] > summary::before {
   color: var(--offline-text);
 }
 
-/* History ledger and page footer. */
+.empty-sheet {
+  padding: var(--space-lg);
+}
+
+.empty-sheet h2 {
+  margin-bottom: var(--space-sm);
+}
+
+.empty-sheet p {
+  max-width: var(--measure-long);
+}
+
+/* History ledger. */
 .history {
   padding: var(--space-md);
   min-width: 0;
@@ -749,21 +724,18 @@ details[open] > summary::before {
 }
 
 .history-head {
-  margin-bottom: var(--space-md);
-}
-
-.history-head .subtle {
-  margin-top: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  font-size: var(--text-body);
 }
 
 .history-item {
   border: 0;
   border-top: var(--stroke-thin) solid var(--history-rule);
   background: transparent;
-  padding-block: var(--space-md);
+  padding-block: var(--space-sm);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
   width: 100%;
   text-align: left;
 }
@@ -773,11 +745,12 @@ details[open] > summary::before {
 }
 
 .history-command {
+  display: block;
   grid-row: 2;
   grid-column: 1 / -1;
+  font-weight: var(--weight-medium);
 }
 
-.queue-item[aria-pressed="true"] .queue-command,
 .history-item[aria-pressed="true"] .history-command {
   text-decoration: underline;
   text-underline-offset: var(--space-xs);
@@ -793,7 +766,7 @@ details[open] > summary::before {
   display: inline-block;
   justify-self: start;
   border: var(--stroke-thin) solid currentColor;
-  padding: var(--space-xs) var(--space-sm);
+  padding: 0 var(--space-xs);
 }
 
 .grants {
@@ -802,30 +775,36 @@ details[open] > summary::before {
 
 .grant-item {
   border-top: var(--stroke-thin) solid var(--history-rule);
-  padding-block: var(--space-md);
+  padding-block: var(--space-sm);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-sm);
   align-items: start;
 }
 
-.history-foot {
-  margin-top: var(--space-md);
-  max-width: var(--measure-medium);
+/* Help dialog: everything that teaches the tool once. */
+.help {
+  width: min(36rem, calc(100% - var(--space-lg)));
+  padding: var(--space-md);
+  background: var(--paper);
+  color: var(--text);
+  border: var(--stroke-strong) solid var(--ink);
+  box-shadow: var(--raised-shadow);
 }
 
-.footer {
-  border-top: var(--stroke-thin) solid var(--rule);
-  margin-top: var(--space-lg);
-  padding-block: var(--space-md);
+.help::backdrop {
+  background: rgb(0 0 0 / 0.3);
 }
 
-.empty-sheet {
-  padding: var(--sheet-inset);
+.help-head {
+  margin-bottom: var(--space-sm);
 }
 
-.empty-sheet h2 {
-  margin-bottom: var(--space-md);
+.help-notes {
+  display: grid;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-md);
+  padding-left: var(--space-md);
 }
 
 /* Accessibility geometry is deliberately outside the visual spacing scale. */
@@ -841,7 +820,7 @@ details[open] > summary::before {
   border: 0;
 }
 
-/* Compact desk: keep the fixed sidebar, reduce gutters, stack dense field/action rows. */
+/* Compact desk: keep the fixed sidebar, reduce gutters. */
 @media (max-width: 64rem) {
   .workspace {
     gap: var(--space-md);
@@ -850,78 +829,15 @@ details[open] > summary::before {
   .app {
     --app-inset: var(--space-md);
   }
-
-  .context {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .action-row,
-  .terminal {
-    align-items: start;
-    flex-direction: column;
-  }
-
-  .actions {
-    align-self: end;
-  }
-}
-
-/* Header wrap: service controls get their own compact track. */
-@media (max-width: 48rem) {
-  .masthead {
-    align-items: start;
-  }
-
-  .service {
-    --row-gap: var(--space-sm);
-    max-width: var(--sidebar-width);
-  }
-
-  .connection {
-    width: 100%;
-    justify-content: flex-end;
-  }
 }
 
 /* Single column: change composition, not the type scale or control targets. */
 @media (max-width: 40rem) {
-  .masthead {
-    padding-block: var(--space-md);
-  }
-
-  .brand {
-    --brand-size: var(--space-lg);
-  }
-
-  .brand-name {
-    font-size: var(--text-heading);
-  }
-
-  .brand-caption {
-    max-width: var(--measure-short);
-  }
-
-  .service {
-    max-width: calc(var(--sidebar-width) / 2);
-    align-items: flex-end;
-    flex-direction: column;
-  }
-
-  .intro {
-    padding-block: var(--space-md);
-    align-items: start;
-  }
-
   .workspace {
     display: block;
   }
 
-  .sheet {
-    --sheet-inset: var(--space-md);
-  }
-
   .actions {
-    align-self: stretch;
     width: 100%;
   }
 
