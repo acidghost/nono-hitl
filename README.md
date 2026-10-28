@@ -125,12 +125,20 @@ Server options:
       maximum time to wait for a decision (default 55s)
 -open
       open the dashboard in the default browser
+-nono-state-dir string
+      nono state directory holding the session records
+      (default "$XDG_STATE_HOME/nono" or "~/.local/state/nono")
 ```
 
 The listen address must use literal `127.0.0.1`; `localhost`, IPv6 loopback,
 wildcard addresses, and non-loopback addresses are rejected. Keep the decision
 timeout below nono's webhook timeout. The supplied profile uses 60 seconds for
 nono and the service defaults to 55 seconds.
+
+The state directory follows nono's own rule: `$XDG_STATE_HOME/nono` when that
+variable holds an absolute path, `~/.local/state/nono` otherwise. Set
+`-nono-state-dir` only if nono runs with a different `XDG_STATE_HOME` than the
+service.
 
 Stopping the process with `SIGINT` or `SIGTERM` denies all pending requests and
 shuts the HTTP server down gracefully.
@@ -173,9 +181,13 @@ exactly. Matching requests already waiting are granted at once. The session is
 the `session_id` nono's supervisor reports for each `nono run`, so a new run
 starts without session approvals.
 
-`nono-hitl` cannot tell when a nono session ends. Session approvals stay in
-memory until revoked from the dashboard, evicted (oldest first, at most 64), or
-the service restarts. Requests released this way appear in recent decisions.
+The dashboard names each session from the record nono keeps under `sessions/` in
+its state directory, showing the agent and working directory too. Without a
+record it shows the session ID. Every 30 seconds the service revokes session
+approvals whose record says the session exited. A missing record keeps them.
+Otherwise approvals stay in memory until revoked from the dashboard, evicted
+(oldest first, at most 64), or the service restarts. Requests released this way
+appear in History, and each approval counts them.
 
 Exactness covers only what nono reports: nono omits arguments that are not valid
 UTF-8 from the request, so two invocations differing only in such an argument
@@ -244,6 +256,13 @@ Approval releases only the profile's static child sandbox. Request arguments are
 displayed as untrusted text, never shell-parsed or executed by `nono-hitl`, and
 rendered through DOM `textContent`. The service accepts nono command requests
 for any non-empty command name; unsupported capability types fail closed.
+
+The service reads nono's session records from the state directory. Session IDs
+are checked against nono's ID rule before building a path, and symlinks,
+non-regular files and records over 64 KiB are refused. Names, agents and
+directories from a record are display labels: session approvals match on the
+session ID in the request. A record can only remove approvals, by saying its
+session exited.
 
 ### Bounded, fail-closed behavior
 

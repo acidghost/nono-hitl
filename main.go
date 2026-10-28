@@ -9,11 +9,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/acidghost/nono-hitl/internal/approval"
 	"github.com/acidghost/nono-hitl/internal/browser"
 	"github.com/acidghost/nono-hitl/internal/server"
+	"github.com/acidghost/nono-hitl/internal/session"
 )
+
+const exitedSessionsInterval = 30 * time.Second
 
 var (
 	buildVersion string
@@ -51,6 +55,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 func runServe(args []string, stdout, stderr io.Writer) error {
 	config := server.DefaultConfig()
 	openDashboard := false
+	stateDir := session.DefaultStateDir()
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.StringVar(
@@ -71,6 +76,12 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		openDashboard,
 		"open the dashboard in the default browser",
 	)
+	flags.StringVar(
+		&stateDir,
+		"nono-state-dir",
+		stateDir,
+		"nono state directory holding the session records",
+	)
 	flags.Usage = func() {
 		_, _ = fmt.Fprintln(stderr, "Usage: nono-hitl serve [options]")
 		flags.PrintDefaults()
@@ -85,10 +96,15 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("serve does not accept positional arguments")
 	}
 
+	registry, err := session.NewRegistry(stateDir)
+	if err != nil {
+		return fmt.Errorf("configure session records: %w", err)
+	}
 	store, err := approval.NewStore(approval.StoreConfig{
-		MaxPending: 32,
-		MaxRecent:  100,
-		MaxGrants:  64,
+		MaxPending:    32,
+		MaxRecent:     100,
+		MaxGrants:     64,
+		LookupSession: registry.Lookup,
 	})
 	if err != nil {
 		return fmt.Errorf("create approval store: %w", err)
@@ -111,11 +127,25 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 			}
 		}()
 	}
+	go revokeExitedSessions(ctx, store)
 	_, _ = fmt.Fprintf(stdout, "nono-hitl listening on %s\n", service.URL())
 	if err := service.Run(ctx); err != nil {
 		return err
 	}
 	return nil
+}
+
+func revokeExitedSessions(ctx context.Context, store *approval.Store) {
+	ticker := time.NewTicker(exitedSessionsInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			store.RevokeExited()
+		}
+	}
 }
 
 func printUsage(writer io.Writer) {

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/acidghost/nono-hitl/internal/session"
 )
 
 var (
@@ -44,14 +46,18 @@ type Resolution struct {
 
 // SessionGrant approves every later request reporting exactly the same nono
 // session, command, argv, caller, and rule. ID is the approving request's ID.
+// Uses counts the requests it released.
 type SessionGrant struct {
-	ID            string    `json:"id"`
-	SessionID     string    `json:"session_id"`
-	Command       string    `json:"command"`
-	Args          []string  `json:"args"`
-	Caller        string    `json:"caller"`
-	InterceptRule string    `json:"intercept_rule"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            string          `json:"id"`
+	SessionID     string          `json:"session_id"`
+	Session       *session.Record `json:"session,omitempty"`
+	Command       string          `json:"command"`
+	Args          []string        `json:"args"`
+	Caller        string          `json:"caller"`
+	InterceptRule string          `json:"intercept_rule"`
+	CreatedAt     time.Time       `json:"created_at"`
+	Uses          int             `json:"uses"`
+	LastUsedAt    time.Time       `json:"last_used_at,omitzero"`
 }
 
 // EventKind identifies an approval-store change.
@@ -72,9 +78,11 @@ type Event struct {
 	Grants   []SessionGrant `json:"grants,omitempty"`
 }
 
-// Approval is an immutable snapshot suitable for an API or UI.
+// Approval is an immutable snapshot suitable for an API or UI. Session is
+// nono's record of the requesting session when one could be read.
 type Approval struct {
 	Envelope   WebhookEnvelope `json:"envelope"`
+	Session    *session.Record `json:"session,omitempty"`
 	State      State           `json:"state"`
 	CreatedAt  time.Time       `json:"created_at"`
 	Deadline   time.Time       `json:"deadline"`
@@ -88,6 +96,9 @@ type StoreConfig struct {
 	// MaxGrants bounds session grants; the oldest is evicted when full. Zero
 	// disables session approvals.
 	MaxGrants int
+	// LookupSession reads nono's record of a session. Nil disables session
+	// records and revoking grants of exited sessions.
+	LookupSession func(sessionID string) (*session.Record, error)
 }
 
 type entry struct {
@@ -108,6 +119,7 @@ type Store struct {
 	maxPending  int
 	maxRecent   int
 	maxGrants   int
+	lookup      func(sessionID string) (*session.Record, error)
 	closed      bool
 }
 
@@ -132,6 +144,7 @@ func NewStore(config StoreConfig) (*Store, error) {
 		maxPending:  config.MaxPending,
 		maxRecent:   config.MaxRecent,
 		maxGrants:   config.MaxGrants,
+		lookup:      config.LookupSession,
 	}, nil
 }
 
@@ -152,7 +165,7 @@ func (s *Store) Submit(
 		return Resolution{}, errors.New("approval timeout must be positive")
 	}
 
-	item, err := s.add(envelope, timeout)
+	item, err := s.add(envelope, s.lookupSession(envelope.Request.SessionID), timeout)
 	if err != nil {
 		return Resolution{}, err
 	}
@@ -206,9 +219,10 @@ func (s *Store) DecideForSession(requestID string, reason string) (Resolution, e
 	if len(s.grants) >= s.maxGrants {
 		s.evictOldestGrantLocked()
 	}
-	s.grants[key] = SessionGrant{
+	grant := SessionGrant{
 		ID:            requestID,
 		SessionID:     request.SessionID,
+		Session:       cloneRecord(item.approval.Session),
 		Command:       request.Command,
 		Args:          append([]string(nil), request.Args...),
 		Caller:        request.Caller,
@@ -219,9 +233,12 @@ func (s *Store) DecideForSession(requestID string, reason string) (Resolution, e
 	resolution := s.finishLocked(item, StateGranted, ScopeSession, reason)
 	for _, other := range s.pending {
 		if grantKey(other.approval.Envelope.Request) == key {
-			s.finishLocked(other, StateGranted, ScopeSession, "Matched session approval")
+			released := s.finishLocked(other, StateGranted, ScopeSession, "Matched session approval")
+			grant.Uses++
+			grant.LastUsedAt = released.ResolvedAt
 		}
 	}
+	s.grants[key] = grant
 	s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
 	return resolution, nil
 }
@@ -239,6 +256,24 @@ func (s *Store) Revoke(grantID string) error {
 		}
 	}
 	return fmt.Errorf("%w: %s", ErrNotFound, grantID)
+}
+
+// RevokeExited revokes session grants whose nono session record says the
+// session exited. nono never reuses a session ID, so those grants cannot match
+// again. Grants are kept when the record is missing or unreadable.
+func (s *Store) RevokeExited() {
+	exited := make(map[string]bool)
+	for _, grant := range s.Grants() {
+		gone, checked := exited[grant.SessionID]
+		if !checked {
+			record := s.lookupSession(grant.SessionID)
+			gone = record != nil && record.Status == session.StatusExited
+			exited[grant.SessionID] = gone
+		}
+		if gone {
+			_ = s.Revoke(grant.ID)
+		}
+	}
 }
 
 // Grants returns session grants ordered oldest first.
@@ -359,6 +394,7 @@ func (s *Store) grantsLocked() []SessionGrant {
 	grants := make([]SessionGrant, 0, len(s.grants))
 	for _, grant := range s.grants {
 		grant.Args = append([]string(nil), grant.Args...)
+		grant.Session = cloneRecord(grant.Session)
 		grants = append(grants, grant)
 	}
 	sort.Slice(grants, func(i, j int) bool {
@@ -385,7 +421,24 @@ func grantKey(request CommandRequest) string {
 		request.SessionID, request.Command, request.Caller, request.InterceptRule, request.Args)
 }
 
-func (s *Store) add(envelope WebhookEnvelope, timeout time.Duration) (*entry, error) {
+// lookupSession reads a session record without holding the store lock. Any
+// failure leaves the approval without one.
+func (s *Store) lookupSession(sessionID string) *session.Record {
+	if s.lookup == nil {
+		return nil
+	}
+	record, err := s.lookup(sessionID)
+	if err != nil {
+		return nil
+	}
+	return record
+}
+
+func (s *Store) add(
+	envelope WebhookEnvelope,
+	record *session.Record,
+	timeout time.Duration,
+) (*entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -404,14 +457,20 @@ func (s *Store) add(envelope WebhookEnvelope, timeout time.Duration) (*entry, er
 	item := &entry{
 		approval: Approval{
 			Envelope:  cloneEnvelope(envelope),
+			Session:   cloneRecord(record),
 			State:     StatePending,
 			CreatedAt: now,
 			Deadline:  now.Add(timeout),
 		},
 		done: make(chan struct{}),
 	}
-	if _, granted := s.grants[grantKey(envelope.Request)]; granted {
-		s.finishLocked(item, StateGranted, ScopeSession, "Matched session approval")
+	key := grantKey(envelope.Request)
+	if grant, granted := s.grants[key]; granted {
+		released := s.finishLocked(item, StateGranted, ScopeSession, "Matched session approval")
+		grant.Uses++
+		grant.LastUsedAt = released.ResolvedAt
+		s.grants[key] = grant
+		s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
 		return item, nil
 	}
 
@@ -507,9 +566,19 @@ func resolutionOf(item *entry) Resolution {
 func cloneApproval(approval Approval) Approval {
 	cloned := approval
 	cloned.Envelope = cloneEnvelope(approval.Envelope)
+	cloned.Session = cloneRecord(approval.Session)
 	if approval.Resolution != nil {
 		resolution := *approval.Resolution
 		cloned.Resolution = &resolution
 	}
 	return cloned
+}
+
+func cloneRecord(record *session.Record) *session.Record {
+	if record == nil {
+		return nil
+	}
+	cloned := *record
+	cloned.Command = append([]string(nil), record.Command...)
+	return &cloned
 }

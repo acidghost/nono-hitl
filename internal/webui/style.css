@@ -791,6 +791,10 @@ details[open] > summary::before {
   background: var(--wash);
 }
 
+.session-title {
+  min-width: 0;
+}
+
 .session-name {
   font-size: var(--text-body);
 }

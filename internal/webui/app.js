@@ -90,8 +90,16 @@ document.addEventListener("DOMContentLoaded", () => {
     return safeInline([request.command, ...args.slice(1, 3)].join(" "), 100) || "Command request";
   }
 
-  function sessionLabel(request) {
-    return safeInline(request.session_id, 40) || "unknown session";
+  // record is nono's session record, when the service could read it.
+  function sessionLabel(sessionID, record) {
+    return safeInline(record?.name, 40) || safeInline(sessionID, 40) || "unknown session";
+  }
+
+  function sessionWhere(record) {
+    const program = Array.isArray(record?.command) ? String(record.command[0] ?? "") : "";
+    const agent = safeInline(program.split("/").pop(), 40);
+    const workdir = safeInline(record?.workdir, 200);
+    return agent && workdir ? `${agent} in ${workdir}` : agent || workdir;
   }
 
   // nono reports invocation policy labels relative to the caller's profile entry.
@@ -350,7 +358,7 @@ document.addEventListener("DOMContentLoaded", () => {
           textElement(
             "span",
             "queue-meta text-small text-muted",
-            sessionLabel(commandRequest(approval)),
+            sessionLabel(commandRequest(approval).session_id, approval.session),
           ),
         );
         return button;
@@ -426,8 +434,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const groups = [];
     for (const [sessionID, sessionGrants] of bySession) {
-      const label = sessionLabel({ session_id: sessionID });
-      const shown = sessionGrants.filter((grant) => matchesFilter(label, displayArgs(grant.args)));
+      const record = sessionGrants.find((grant) => grant.session)?.session;
+      const label = sessionLabel(sessionID, record);
+      const where = sessionWhere(record);
+      const shown = sessionGrants.filter((grant) =>
+        matchesFilter(label, where, displayArgs(grant.args)),
+      );
       if (shown.length === 0) continue;
       const group = element("section", "session-group");
       const head = element("div", "session-head row");
@@ -436,11 +448,33 @@ document.addEventListener("DOMContentLoaded", () => {
       revokeAll.append(textElement("kbd", "hint", "⇧X"), ` Revoke all ${sessionGrants.length}`);
       revokeAll.setAttribute("aria-label", `Revoke all session approvals for ${label}`);
       revokeAll.addEventListener("click", () => void revoke(sessionGrants.map(grantID)));
-      head.append(textElement("h2", "session-name break-anywhere", label), revokeAll);
+      head.append(sessionTitle(label, where, record?.started), revokeAll);
       group.append(head, ...shown.map(grantRow));
       groups.push(group);
     }
     return groups;
+  }
+
+  function sessionTitle(label, where, started) {
+    const title = element("div", "session-title");
+    title.append(textElement("h2", "session-name break-anywhere", label));
+    const meta = element("p", "text-small text-muted break-anywhere");
+    if (where) meta.append(where);
+    if (Number.isFinite(timestamp(started))) {
+      const time = textElement("time", "", shortTime(started));
+      time.dateTime = String(started);
+      time.title = fullTime(started);
+      meta.append(where ? ", started " : "Started ", time);
+    }
+    if (meta.hasChildNodes()) title.append(meta);
+    return title;
+  }
+
+  function grantUsage(grant) {
+    const uses = Number(grant.uses) || 0;
+    if (uses === 0) return "unused";
+    const times = uses === 1 ? "once" : `${uses} times`;
+    return `used ${times}, last ${shortTime(grant.last_used_at)}`;
   }
 
   function grantID(grant) {
@@ -461,7 +495,11 @@ document.addEventListener("DOMContentLoaded", () => {
     revokeButton.addEventListener("click", () => void revoke([grantID(grant)]));
     row.append(
       textElement("code", "break-anywhere pre-wrap", displayArgs(grant.args)),
-      textElement("span", "text-small text-muted", `approved ${shortTime(grant.created_at)}`),
+      textElement(
+        "span",
+        "text-small text-muted",
+        `approved ${shortTime(grant.created_at)}, ${grantUsage(grant)}`,
+      ),
       revokeButton,
     );
     addRow(row, { grant });
@@ -477,7 +515,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const request = commandRequest(approval);
         return matchesFilter(
           displayArgs(request.args),
-          sessionLabel(request),
+          sessionLabel(request.session_id, approval.session),
           stateLabel(approval.state),
           approval.resolution?.reason,
         );
@@ -500,15 +538,12 @@ document.addEventListener("DOMContentLoaded", () => {
       `${stateLabel(approval.state)}: ${commandTitle(approval)}, ${fullTime(resolved)}`,
     );
     const how = safeInline(approval.resolution?.reason, 80);
+    const label = sessionLabel(request.session_id, approval.session);
     button.append(
       textElement("span", `mini-stamp text-small ${approval.state}`, stateLabel(approval.state)),
       textElement("code", "break-anywhere", safeInline(displayArgs(request.args), 200)),
       time,
-      textElement(
-        "span",
-        "history-meta text-small text-muted",
-        how ? `${sessionLabel(request)}, ${how}` : sessionLabel(request),
-      ),
+      textElement("span", "history-meta text-small text-muted", how ? `${label}, ${how}` : label),
     );
     button.addEventListener("click", () => openHistory(id));
     addRow(button, { approval });
@@ -596,8 +631,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const args = Array.isArray(request.args) ? request.args : [];
     $("details").open = false;
     $("request-title").textContent = commandTitle(approval);
-    $("session").textContent = sessionLabel(request);
-    $("scope").textContent = `Session approval covers this exact argv in ${sessionLabel(request)}`;
+    const label = sessionLabel(request.session_id, approval.session);
+    $("session").textContent = label;
+    $("session-where").textContent = sessionWhere(approval.session);
+    $("session-where").hidden = !approval.session;
+    $("scope").textContent = `Session approval covers this exact argv in ${label}`;
     $("command").replaceChildren(...args.flatMap(argumentChips));
     const exception = exceptionLines(request);
     $("exception").replaceChildren(...exception);
@@ -609,12 +647,23 @@ document.addEventListener("DOMContentLoaded", () => {
       metadataItem("Rule", rulePath(request)),
       metadataItem("Reason", request.reason || "—"),
       metadataItem("Session ID", request.session_id),
+      ...sessionItems(approval.session),
       metadataItem("Request ID", requestID(approval)),
       metadataItem("Shim PID", request.child_pid),
       metadataItem("Backend", approval.envelope?.backend),
       metadataItem("Received", approval.created_at),
       metadataItem("Deadline", approval.deadline),
     );
+  }
+
+  function sessionItems(record) {
+    if (!record) return [];
+    return [
+      metadataItem("Session command", displayArgs(record.command)),
+      metadataItem("Profile", record.profile || "—"),
+      metadataItem("Working directory", record.workdir),
+      metadataItem("Session started", record.started),
+    ];
   }
 
   function renderSheet(approval) {

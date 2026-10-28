@@ -73,6 +73,7 @@
             <h2 class="sr-only" id="request-title">Command request</h2>
             <p class="who row text-muted">
               <span>Session</span><strong id="session"></strong
+              ><span class="break-anywhere" id="session-where" hidden></span
               ><span class="clock" id="clock"></span>
             </p>
             <div class="argv-chips" id="command"></div>
@@ -140,7 +141,7 @@
         <li>
           Approve once covers this invocation only. Approve for session also covers later requests
           from the same nono session with exactly the same command, argument array, caller and rule,
-          until you revoke it.
+          until you revoke it or the session exits.
         </li>
         <li>
           Approving lets nono run the command in the child sandbox set by the profile. It adds no

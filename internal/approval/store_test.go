@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/acidghost/nono-hitl/internal/session"
 )
 
 func TestStoreSubmitAndDecide(t *testing.T) {
@@ -383,6 +386,103 @@ func TestStoreSessionGrantsAreBoundedAndRevocable(t *testing.T) {
 	_ = awaitResult(t, result)
 }
 
+func TestStoreCountsSessionGrantReleases(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 16)
+	first := submitAsync(store, testEnvelope("req-1"), time.Second)
+	second := submitAsync(store, testEnvelope("req-2"), time.Second)
+	waitForPending(t, store, 2)
+	if _, err := store.DecideForSession("req-1", ""); err != nil {
+		t.Fatalf("DecideForSession() error = %v", err)
+	}
+	_ = awaitResult(t, first)
+	_ = awaitResult(t, second)
+	if grants := store.Grants(); len(grants) != 1 || grants[0].Uses != 1 || grants[0].LastUsedAt.IsZero() {
+		t.Fatalf("Grants() = %+v, want one grant used once", grants)
+	}
+
+	_ = awaitResult(t, submitAsync(store, testEnvelope("req-3"), time.Second))
+	other := testEnvelope("req-other")
+	other.Request.Args = []string{"gh", "other"}
+	result := submitAsync(store, other, time.Second)
+	waitForPending(t, store, 1)
+	_, _ = store.Decide("req-other", StateDenied, "cleanup")
+	_ = awaitResult(t, result)
+
+	grants := store.Grants()
+	if len(grants) != 1 || grants[0].Uses != 2 {
+		t.Fatalf("Grants() = %+v, want one grant used twice", grants)
+	}
+	recent := store.Recent()
+	if recent[1].Envelope.Request.RequestID != "req-3" || !grants[0].LastUsedAt.Equal(recent[1].Resolution.ResolvedAt) {
+		t.Fatalf("LastUsedAt = %v, want the release time of req-3", grants[0].LastUsedAt)
+	}
+}
+
+func TestStoreAttachesSessionRecords(t *testing.T) {
+	t.Parallel()
+
+	store := newSessionStore(t, map[string]string{"session-1": "running"})
+	result := submitAsync(store, testEnvelope("req-1"), time.Second)
+	unknown := testEnvelope("req-unknown")
+	unknown.Request.SessionID = "session-unknown"
+	unknownResult := submitAsync(store, unknown, time.Second)
+	waitForPending(t, store, 2)
+
+	for _, pending := range store.Pending() {
+		known := pending.Envelope.Request.SessionID == "session-1"
+		if known != (pending.Session != nil) {
+			t.Fatalf("%s Session = %+v, want a record only for session-1", pending.Envelope.Request.RequestID, pending.Session)
+		}
+	}
+	if _, err := store.DecideForSession("req-1", ""); err != nil {
+		t.Fatalf("DecideForSession() error = %v", err)
+	}
+	_ = awaitResult(t, result)
+	if grants := store.Grants(); len(grants) != 1 || grants[0].Session == nil || grants[0].Session.Name != "name of session-1" {
+		t.Fatalf("Grants() = %+v, want the session record copied", grants)
+	}
+	_, _ = store.Decide("req-unknown", StateDenied, "cleanup")
+	_ = awaitResult(t, unknownResult)
+}
+
+func TestStoreRevokesOnlyGrantsOfExitedSessions(t *testing.T) {
+	t.Parallel()
+
+	store := newSessionStore(t, map[string]string{
+		"session-running": "running",
+		"session-paused":  "paused",
+		"session-exited":  session.StatusExited,
+	})
+	sessions := []string{"session-running", "session-paused", "session-exited", "session-missing"}
+	for _, sessionID := range sessions {
+		envelope := testEnvelope("req-" + sessionID)
+		envelope.Request.SessionID = sessionID
+		result := submitAsync(store, envelope, time.Second)
+		waitForPending(t, store, 1)
+		if _, err := store.DecideForSession("req-"+sessionID, ""); err != nil {
+			t.Fatalf("DecideForSession(%s) error = %v", sessionID, err)
+		}
+		_ = awaitResult(t, result)
+	}
+
+	events, unsubscribe := store.Subscribe(4)
+	defer unsubscribe()
+	store.RevokeExited()
+
+	if event := awaitEvent(t, events); event.Kind != EventGrants || len(event.Grants) != 3 {
+		t.Fatalf("event = %+v, want grants event with three grants", event)
+	}
+	kept := make([]string, 0, 3)
+	for _, grant := range store.Grants() {
+		kept = append(kept, grant.SessionID)
+	}
+	if fmt.Sprint(kept) != "[session-running session-paused session-missing]" {
+		t.Fatalf("kept grants for %v, want running, paused and missing sessions", kept)
+	}
+}
+
 func TestStoreSessionGrantsCanBeDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -422,6 +522,29 @@ type submitResult struct {
 func newTestStore(t *testing.T, maxPending, maxRecent int) *Store {
 	t.Helper()
 	store, err := NewStore(StoreConfig{MaxPending: maxPending, MaxRecent: maxRecent, MaxGrants: 2})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() { store.Shutdown("test cleanup") })
+	return store
+}
+
+// newSessionStore looks up records with the given statuses. Other sessions
+// have no record.
+func newSessionStore(t *testing.T, statuses map[string]string) *Store {
+	t.Helper()
+	store, err := NewStore(StoreConfig{
+		MaxPending: 4,
+		MaxRecent:  16,
+		MaxGrants:  8,
+		LookupSession: func(sessionID string) (*session.Record, error) {
+			status, exists := statuses[sessionID]
+			if !exists {
+				return nil, fs.ErrNotExist
+			}
+			return &session.Record{Name: "name of " + sessionID, Status: status}, nil
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
