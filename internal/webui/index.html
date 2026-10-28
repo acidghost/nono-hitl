@@ -18,12 +18,20 @@
           <img src="/assets/logo.svg" alt="" width="24" height="24">
           <span>nono / hitl</span>
         </p>
+        <nav class="views row gap-small" aria-label="Views">
+          <a class="view-link row gap-small" id="view-pending" href="#pending"
+            >Pending <span class="badge" id="pending-count">0</span><kbd class="hint">p</kbd></a
+          ><a class="view-link row gap-small" id="view-sessions" href="#sessions"
+            >Sessions <span class="badge" id="grant-count">0</span><kbd class="hint">s</kbd></a
+          ><a class="view-link row gap-small" id="view-history" href="#history"
+            >History <kbd class="hint">h</kbd></a
+          >
+        </nav>
         <div class="status row text-small text-muted">
           <p id="connection" class="connection row gap-small" data-state="connecting" role="status">
             <span class="dot" aria-hidden="true"></span
             ><span id="connection-label">Connecting</span>
           </p>
-          <p><span class="badge" id="pending-count">0</span> waiting</p>
           <button class="quiet" id="notification" type="button" hidden>Enable notifications</button>
           <button
             class="help-button"
@@ -38,84 +46,88 @@
         </div>
       </header>
       <main class="workspace" id="workspace">
-        <div class="review-column">
-          <p id="offline-banner" class="offline-banner" role="status" hidden>
-            Connection lost. Decisions are disabled until the request state is reconciled. Requests
-            still deny at their deadlines.
-          </p>
-          <nav id="queue-items" class="queue-items" aria-label="Waiting requests"></nav>
-          <section class="sheet" id="sheet" hidden aria-labelledby="request-title">
-            <div class="deadline-bar" aria-hidden="true"></div>
-            <div class="sheet-body" id="review" tabindex="-1">
-              <h2 class="sr-only" id="request-title">Command request</h2>
-              <p class="who row text-muted">
-                <span>Session</span><strong id="session"></strong
-                ><span class="clock" id="clock"></span>
-              </p>
-              <div class="argv-chips" id="command"></div>
-              <div class="exception" id="exception" hidden></div>
-            </div>
-            <div class="decision-area">
-              <div id="pending-actions">
-                <p
-                  id="decision-feedback"
-                  class="decision-feedback break-anywhere pre-wrap"
-                  role="status"
-                ></p>
-                <div class="action-row row">
-                  <span class="scope text-small text-muted" id="scope"></span>
-                  <div class="actions row gap-small">
-                    <button class="deny button-deny" id="deny" type="button" disabled>
-                      <kbd class="hint">n</kbd>Deny
-                    </button><button class="armed" id="approve-session" type="button" disabled>
-                      <kbd class="hint">⇧Y</kbd>Approve for session
-                    </button><button
-                      class="approve armed row gap-small"
-                      id="approve"
-                      type="button"
-                      disabled
-                    >
-                      <kbd class="hint">y</kbd>
-                      <span>Approve once</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div id="terminal" class="terminal row spread" hidden>
-                <div>
-                  <h3 class="text-body" id="terminal-title">Resolved command request</h3>
-                  <p class="text-small text-muted break-anywhere pre-wrap" id="terminal-reason"></p>
-                </div>
-                <div class="stamp" id="stamp"></div>
-              </div>
-            </div>
-            <details class="technical" id="details">
-              <summary class="row gap-small">Details</summary>
-              <dl class="tech-grid" id="technical-data"></dl>
-              <p class="text-small text-muted">
-                The request doesn't include the child's filesystem, network or credential grants.
-                Those live in the nono profile.
-              </p>
-            </details>
-          </section>
-          <section class="sheet empty-sheet" id="empty-sheet">
-            <h2>Nothing is waiting</h2>
-            <p class="text-muted">
-              New requests show up here and as a notification. Unanswered requests are denied at
-              their deadline.
+        <p id="offline-banner" class="offline-banner" role="status" hidden>
+          Connection lost. Decisions are disabled until the request state is reconciled. Requests
+          still deny at their deadlines.
+        </p>
+        <nav id="queue-items" class="queue-items" aria-label="Waiting requests"></nav>
+        <label class="filter row gap-small" id="list-tools" for="filter" hidden
+          ><kbd class="hint">/</kbd><span class="sr-only">Filter</span>
+          <input
+            id="filter"
+            type="search"
+            placeholder="Filter by command or session"
+            autocomplete="off"
+          ></label
+        >
+        <div id="session-groups" hidden></div>
+        <div class="list" id="history-items" hidden></div>
+        <p class="list-empty text-muted" id="list-empty" hidden></p>
+        <button class="quiet back" id="back" type="button" hidden>
+          <kbd class="hint">Esc</kbd>
+          Back to history
+        </button>
+        <section class="sheet" id="sheet" hidden aria-labelledby="request-title">
+          <div class="deadline-bar" aria-hidden="true"></div>
+          <div class="sheet-body" id="review" tabindex="-1">
+            <h2 class="sr-only" id="request-title">Command request</h2>
+            <p class="who row text-muted">
+              <span>Session</span><strong id="session"></strong
+              ><span class="clock" id="clock"></span>
             </p>
-          </section>
-        </div>
-        <aside class="history" aria-labelledby="history-title">
-          <section class="grants" aria-labelledby="grants-title">
-            <h2 class="history-head" id="grants-title">Session approvals</h2>
-            <div id="grant-items"></div>
-            <p class="text-small text-muted" id="grants-empty">None yet.</p>
-          </section>
-          <h2 class="history-head" id="history-title">Recent decisions</h2>
-          <div id="history-items"></div>
-          <p class="text-small text-muted" id="history-empty">None yet.</p>
-        </aside>
+            <div class="argv-chips" id="command"></div>
+            <div class="exception" id="exception" hidden></div>
+          </div>
+          <div class="decision-area">
+            <div id="pending-actions">
+              <p
+                id="decision-feedback"
+                class="decision-feedback break-anywhere pre-wrap"
+                role="status"
+              ></p>
+              <div class="action-row row">
+                <span class="scope text-small text-muted" id="scope"></span>
+                <div class="actions row gap-small">
+                  <button class="deny button-deny" id="deny" type="button" disabled>
+                    <kbd class="hint">n</kbd>Deny
+                  </button><button class="armed" id="approve-session" type="button" disabled>
+                    <kbd class="hint">⇧Y</kbd>Approve for session
+                  </button><button
+                    class="approve armed row gap-small"
+                    id="approve"
+                    type="button"
+                    disabled
+                  >
+                    <kbd class="hint">y</kbd>
+                    <span>Approve once</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div id="terminal" class="terminal row spread" hidden>
+              <div>
+                <h3 class="text-body" id="terminal-title">Resolved command request</h3>
+                <p class="text-small text-muted break-anywhere pre-wrap" id="terminal-reason"></p>
+              </div>
+              <div class="stamp" id="stamp"></div>
+            </div>
+          </div>
+          <details class="technical" id="details">
+            <summary class="row gap-small">Details</summary>
+            <dl class="tech-grid" id="technical-data"></dl>
+            <p class="text-small text-muted">
+              The request doesn't include the child's filesystem, network or credential grants.
+              Those live in the nono profile.
+            </p>
+          </details>
+        </section>
+        <section class="sheet empty-sheet" id="empty-sheet">
+          <h2>Nothing is waiting</h2>
+          <p class="text-muted">
+            New requests show up here and as a notification. Unanswered requests are denied at their
+            deadline.
+          </p>
+        </section>
       </main>
     </div>
     <dialog class="help" id="help" aria-labelledby="help-title">
@@ -148,7 +160,7 @@
       <dl class="keys">
         <div>
           <dt><kbd>j</kbd> <kbd>k</kbd></dt>
-          <dd>Next or previous request</dd>
+          <dd>Next or previous request or row</dd>
         </div>
         <div>
           <dt><kbd>1</kbd> to <kbd>9</kbd></dt>
@@ -171,12 +183,32 @@
           <dd>Details</dd>
         </div>
         <div>
+          <dt><kbd>p</kbd> <kbd>s</kbd> <kbd>h</kbd></dt>
+          <dd>Pending, Sessions, History</dd>
+        </div>
+        <div>
+          <dt><kbd>/</kbd></dt>
+          <dd>Filter sessions or history</dd>
+        </div>
+        <div>
+          <dt><kbd>x</kbd></dt>
+          <dd>Revoke a session approval</dd>
+        </div>
+        <div>
+          <dt><kbd>⇧X</kbd></dt>
+          <dd>Revoke a whole session</dd>
+        </div>
+        <div>
+          <dt><kbd>Enter</kbd></dt>
+          <dd>Open a history entry</dd>
+        </div>
+        <div>
           <dt><kbd>?</kbd></dt>
           <dd>This help</dd>
         </div>
         <div>
           <dt><kbd>Esc</kbd></dt>
-          <dd>Close</dd>
+          <dd>Close, clear the filter, go back</dd>
         </div>
       </dl>
       <div class="help-settings row">

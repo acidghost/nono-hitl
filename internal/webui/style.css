@@ -26,8 +26,7 @@
   --measure-short: 16ch;
   --measure-medium: 32ch;
   --measure-long: 64ch;
-  --page-width: 80rem;
-  --sidebar-width: 16rem;
+  --page-width: 64rem;
   --label-width: 6rem;
   /* A single 36px minimum target for buttons, selects and disclosure rows, above WCAG's 24px. */
   --control-size: 2.25rem;
@@ -47,9 +46,7 @@
   --selected-bg: var(--paper);
   --selected-ink: #173f32;
   --selected-meta: #355e4f;
-  --history-bg: #b3f5dc;
   --history-hover: #c6f9e6;
-  --history-rule: #8ccab2;
   --stack: #319e7c;
   --approval-bg: var(--ink);
   --approval-text: var(--paper);
@@ -76,9 +73,7 @@
   --sheet-rule: var(--rule);
   --queue-bg: var(--wash);
   --selected-bg: #b3f5dc;
-  --history-bg: var(--wash);
   --history-hover: #255b46;
-  --history-rule: var(--rule);
   --approval-text: var(--selected-ink);
   --approved: #b3f5dc;
   --danger: #ffb8c8;
@@ -377,15 +372,27 @@ kbd {
   cursor: pointer;
 }
 
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
-  gap: var(--space-lg);
-  align-items: start;
+/* View links read as tabs of the top bar; the current one sits on paper. */
+.views {
+  --row-gap: var(--space-xs);
 }
 
-.review-column {
-  min-width: 0;
+.view-link {
+  min-height: var(--control-size);
+  padding-inline: var(--space-sm);
+  border: var(--stroke-thin) solid transparent;
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.view-link:hover {
+  background: var(--wash);
+}
+
+.view-link[aria-current="page"] {
+  background: var(--paper);
+  border-color: var(--ink);
 }
 
 /* Filing tabs sit directly on the card, each with its own draining deadline bar. */
@@ -756,52 +763,77 @@ details[open] > summary::before {
   max-width: var(--measure-long);
 }
 
-/* History ledger. */
-.history {
-  padding: var(--space-md);
-  min-width: 0;
-  background: var(--history-bg);
-  border: var(--stroke-thin) solid var(--rule);
-  border-top: var(--stroke-strong) solid var(--ink);
+/* Sessions and History: filter on top, rows below, the current row marked on its left edge. */
+.filter {
+  margin-bottom: var(--space-md);
 }
 
-.history-head {
-  margin-bottom: var(--space-sm);
+.filter input {
+  flex: 1;
+  min-height: var(--control-size);
+  padding-inline: var(--space-sm);
+  background: var(--paper);
+  color: var(--text);
+  border: var(--stroke-thin) solid var(--rule);
+  border-radius: 0;
+}
+
+.session-group,
+.list {
+  margin-bottom: var(--space-md);
+  background: var(--paper);
+  border: var(--stroke-thin) solid var(--rule);
+}
+
+.session-head {
+  flex-wrap: wrap;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--wash);
+}
+
+.session-name {
   font-size: var(--text-body);
 }
 
-.history-item {
-  border: 0;
-  border-top: var(--stroke-thin) solid var(--history-rule);
-  background: transparent;
-  padding-block: var(--space-sm);
+.session-head button {
+  margin-left: auto;
+}
+
+.list-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-xs);
+  align-items: center;
+  gap: var(--space-xs) var(--space-md);
   width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: transparent;
+  border: 0;
+  border-top: var(--stroke-thin) solid var(--sheet-rule);
   text-align: left;
 }
 
-.history-item:hover {
+.list .list-row:first-child {
+  border-top: 0;
+}
+
+.list-row[aria-current="true"] {
+  background: var(--wash);
+  box-shadow: inset var(--space-xs) 0 0 var(--ink);
+}
+
+.history-row:hover {
   background: var(--history-hover);
 }
 
-.history-command {
-  display: block;
-  grid-row: 2;
-  grid-column: 1 / -1;
-  font-weight: var(--weight-medium);
+.grant-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
-.history-item[aria-pressed="true"] .history-command {
-  text-decoration: underline;
-  text-underline-offset: var(--space-xs);
+.history-row {
+  grid-template-columns: 6rem minmax(0, 1fr) auto;
 }
 
-.history-time {
-  display: block;
-  align-self: center;
-  text-align: right;
+.history-meta {
+  grid-column: 2 / -1;
 }
 
 .mini-stamp {
@@ -811,17 +843,13 @@ details[open] > summary::before {
   padding: 0 var(--space-xs);
 }
 
-.grants {
-  margin-bottom: var(--space-lg);
+.list-empty {
+  padding: var(--space-md);
+  border: var(--stroke-thin) dashed var(--rule);
 }
 
-.grant-item {
-  border-top: var(--stroke-thin) solid var(--history-rule);
-  padding-block: var(--space-sm);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-sm);
-  align-items: start;
+.back {
+  margin-bottom: var(--space-sm);
 }
 
 /* Help dialog: everything that teaches the tool once. */
@@ -908,12 +936,8 @@ details[open] > summary::before {
   border: 0;
 }
 
-/* Compact desk: keep the fixed sidebar, reduce gutters. */
+/* Compact desk: reduce gutters. */
 @media (max-width: 64rem) {
-  .workspace {
-    gap: var(--space-md);
-  }
-
   .app {
     --app-inset: var(--space-md);
   }
@@ -921,8 +945,19 @@ details[open] > summary::before {
 
 /* Single column: change composition, not the type scale or control targets. */
 @media (max-width: 40rem) {
-  .workspace {
-    display: block;
+  .grant-row,
+  .history-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .grant-row code,
+  .history-row code,
+  .history-meta {
+    grid-column: 1 / -1;
+  }
+
+  .history-row code {
+    grid-row: 2;
   }
 
   .actions {
@@ -931,10 +966,6 @@ details[open] > summary::before {
 
   .actions button {
     flex: 1;
-  }
-
-  .history {
-    margin-top: var(--space-lg);
   }
 }
 

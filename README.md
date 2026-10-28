@@ -140,12 +140,19 @@ shuts the HTTP server down gracefully.
 Open <http://127.0.0.1:8765/>. Do not substitute `localhost`: exact `Host` and
 same-origin checks are intentional.
 
-Select a waiting request tab to review its command, exact argument array, and
-reported context. Recent decisions open the same request sheet with its final
-outcome; approval does not report whether the command executed successfully.
-Decisions are disabled while disconnected, until the request state is
-reconciled, and once the deadline has passed. The **Theme** selector follows the
-system by default; explicit light/dark preferences are saved in this browser.
+The dashboard has three views. **Pending** shows waiting requests as tabs above
+the request card, with the decision buttons right below the arguments.
+**Sessions** lists session approvals grouped by nono session, and **History**
+lists recent decisions; select one to open its card with the final outcome.
+Approval does not report whether the command executed successfully. Decisions
+are disabled while disconnected, until the request state is reconciled, and once
+the deadline has passed.
+
+Everything can be done from the keyboard; press `?` for the shortcuts, the theme
+selector, and a switch that turns shortcuts off. Approve keys are guarded: they
+work only one second after a request is shown or the window gains focus, and
+only after a short pause in typing, so text meant for a terminal cannot approve
+anything.
 
 The dashboard works without browser notifications. To receive them:
 
@@ -170,9 +177,9 @@ starts without session approvals.
 memory until revoked from the dashboard, evicted (oldest first, at most 64), or
 the service restarts. Requests released this way appear in recent decisions.
 
-Exactness covers only what nono reports: nono omits arguments that are not
-valid UTF-8 from the request, so two invocations differing only in such an
-argument look identical.
+Exactness covers only what nono reports: nono omits arguments that are not valid
+UTF-8 from the request, so two invocations differing only in such an argument
+look identical.
 
 The UI receives lifecycle events over SSE and periodically reconciles an atomic
 snapshot, so reconnecting does not create a second approval or lose the

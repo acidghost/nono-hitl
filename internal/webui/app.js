@@ -45,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const armMilliseconds = 1000;
   const quietMilliseconds = 300;
   const shortcutsKey = "nono-hitl-shortcuts";
+  const views = ["pending", "sessions", "history"];
   const $ = (id) => document.getElementById(id);
   const elements = { notifications: $("notification"), actionStatus: $("live") };
   const approvals = { pending: new Map(), recent: new Map() };
@@ -54,6 +55,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const notifiedIDs = new Set();
   const notificationOrder = [];
   let selectedID = "";
+  let view = "pending";
+  // History entry shown on the card; empty while the history list is shown.
+  let openedID = "";
+  let rows = [];
+  let rowIndex = 0;
+  let filterText = "";
   let renderedID = "";
   let connected = false;
   let eventSource;
@@ -75,10 +82,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function commandRequest(approval) {
     return approval?.envelope?.request ?? {};
-  }
-
-  function selectedApproval() {
-    return approvals.pending.get(selectedID) ?? approvals.recent.get(selectedID);
   }
 
   function commandTitle(approval) {
@@ -155,7 +158,9 @@ document.addEventListener("DOMContentLoaded", () => {
     render();
     if (isNew) {
       notify(approval);
-      announce(`Approval requested for ${commandTitle(approval)}`);
+      // Off the Pending view only the badge would change, so say it out loud.
+      if (view === "pending") announce(`Approval requested for ${commandTitle(approval)}`);
+      else notice(`Approval requested for ${commandTitle(approval)}`);
     }
   }
 
@@ -255,12 +260,52 @@ document.addEventListener("DOMContentLoaded", () => {
     render();
   }
 
-  function replaceSelectors(container, buttons) {
+  function viewFromHash() {
+    const name = window.location.hash.slice(1);
+    return views.includes(name) ? name : "";
+  }
+
+  function setView(name) {
+    if (name === view) return;
+    view = name;
+    openedID = "";
+    rowIndex = 0;
+    filterText = "";
+    $("filter").value = "";
+    render();
+  }
+
+  // The hash keeps the view across reloads; hashchange catches links and the back button.
+  function showView(name) {
+    if (window.location.hash !== `#${name}`) window.location.hash = name;
+    setView(name);
+  }
+
+  function shownApproval() {
+    if (view === "pending") return approvals.pending.get(selectedID);
+    if (view === "history") return approvals.recent.get(openedID);
+    return undefined;
+  }
+
+  function openHistory(id) {
+    openedID = id;
+    render();
+    $("review").focus({ preventScroll: true });
+  }
+
+  function closeHistory() {
+    openedID = "";
+    render();
+    rows[rowIndex]?.element.focus({ preventScroll: true });
+  }
+
+  function replaceSelectors(container, items) {
     const active = document.activeElement;
-    const focusedID = container.contains(active) ? active.dataset.requestId : "";
-    container.replaceChildren(...buttons);
+    const focused = container.contains(active) ? active.closest("[data-request-id]") : null;
+    const focusedID = focused?.dataset.requestId ?? "";
+    container.replaceChildren(...items);
     if (focusedID) {
-      const replacement = buttons.find((button) => button.dataset.requestId === focusedID);
+      const replacement = container.querySelector(`[data-request-id="${CSS.escape(focusedID)}"]`);
       (replacement ?? $("review")).focus({ preventScroll: true });
     }
   }
@@ -278,12 +323,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function render() {
     const pending = sortedPending();
-    const recent = [...approvals.recent.values()].sort((left, right) => {
-      return timestamp(right.resolution?.resolved_at) - timestamp(left.resolution?.resolved_at);
-    });
-    if (!selectedApproval()) selectedID = requestID(pending[0]);
+    if (!approvals.pending.has(selectedID)) selectedID = requestID(pending[0]);
+    if (!approvals.recent.has(openedID)) openedID = "";
     $("pending-count").textContent = String(pending.length);
-    $("history-empty").hidden = recent.length !== 0;
+    $("grant-count").textContent = String(grants.length);
+    for (const name of views) {
+      if (name === view) $(`view-${name}`).setAttribute("aria-current", "page");
+      else $(`view-${name}`).removeAttribute("aria-current");
+    }
+    $("queue-items").hidden = view !== "pending";
+    $("list-tools").hidden = view === "pending" || !!openedID;
+    $("back").hidden = !openedID;
     replaceSelectors(
       $("queue-items"),
       pending.map((approval, index) => {
@@ -306,57 +356,163 @@ document.addEventListener("DOMContentLoaded", () => {
         return button;
       }),
     );
-    replaceSelectors(
-      $("history-items"),
-      recent.map((approval) => {
-        const button = selector(approval, "history-item");
-        const resolved = approval.resolution?.resolved_at;
-        const time = textElement("time", "history-time text-small text-muted", shortTime(resolved));
-        time.dateTime = String(resolved ?? "");
-        time.title = fullTime(resolved);
-        button.setAttribute(
-          "aria-label",
-          `${stateLabel(approval.state)}: ${commandTitle(approval)}, ${fullTime(resolved)}`,
-        );
-        button.append(
-          textElement(
-            "span",
-            `mini-stamp text-small ${approval.state}`,
-            stateLabel(approval.state),
-          ),
-          textElement("span", "history-command break-anywhere", commandTitle(approval)),
-          time,
-        );
-        return button;
-      }),
-    );
-    $("grants-empty").hidden = grants.length !== 0;
-    $("grant-items").replaceChildren(...grants.map(grantItem));
-    renderSheet(selectedApproval());
+    renderList();
+    renderSheet(shownApproval());
+    $("empty-sheet").hidden = view !== "pending" || pending.length > 0;
     updateTimes();
   }
 
-  function grantItem(grant) {
-    const row = element("div", "grant-item");
-    const details = element("div", "");
-    details.append(
-      textElement("code", "break-anywhere pre-wrap", displayArgs(grant.args)),
-      textElement(
-        "p",
-        "text-small text-muted break-anywhere",
-        `Session ${safeInline(grant.session_id, 40)} · ${shortTime(grant.created_at)}`,
-      ),
+  // Sessions and History are flat row lists for j, k, x and Enter, whatever their grouping.
+  function renderList() {
+    const sessions = view === "sessions";
+    const history = view === "history" && !openedID;
+    rows = [];
+    $("session-groups").hidden = !sessions;
+    $("history-items").hidden = !history;
+    if (sessions) replaceSelectors($("session-groups"), sessionGroups());
+    if (history) replaceSelectors($("history-items"), historyRows());
+    rowIndex = Math.max(0, Math.min(rowIndex, rows.length - 1));
+    markCurrentRow();
+    $("list-empty").hidden = !(sessions || history) || rows.length > 0;
+    $("list-empty").textContent = filterText.trim()
+      ? `Nothing matches "${safeInline(filterText, 60)}".`
+      : sessions
+        ? "No session approvals."
+        : "No decisions yet.";
+  }
+
+  function markCurrentRow() {
+    rows.forEach((row, index) => {
+      if (index === rowIndex) row.element.setAttribute("aria-current", "true");
+      else row.element.removeAttribute("aria-current");
+    });
+  }
+
+  function moveRow(step) {
+    if (rows.length === 0) return false;
+    rowIndex = Math.max(0, Math.min(rows.length - 1, rowIndex + step));
+    markCurrentRow();
+    rows[rowIndex].element.focus({ preventScroll: true });
+    rows[rowIndex].element.scrollIntoView({ block: "nearest" });
+    return true;
+  }
+
+  function addRow(element, row) {
+    const index = rows.push({ element, ...row }) - 1;
+    element.addEventListener("focusin", () => {
+      rowIndex = index;
+      markCurrentRow();
+    });
+  }
+
+  function matchesFilter(...values) {
+    const query = filterText.trim().toLowerCase();
+    return (
+      !query ||
+      values.some((value) =>
+        String(value ?? "")
+          .toLowerCase()
+          .includes(query),
+      )
     );
-    const revokeButton = textElement("button", "quiet text-small", "Revoke");
+  }
+
+  function sessionGroups() {
+    const bySession = new Map();
+    for (const grant of grants) {
+      const id = String(grant.session_id ?? "");
+      if (!bySession.has(id)) bySession.set(id, []);
+      bySession.get(id).push(grant);
+    }
+    const groups = [];
+    for (const [sessionID, sessionGrants] of bySession) {
+      const label = sessionLabel({ session_id: sessionID });
+      const shown = sessionGrants.filter((grant) => matchesFilter(label, displayArgs(grant.args)));
+      if (shown.length === 0) continue;
+      const group = element("section", "session-group");
+      const head = element("div", "session-head row");
+      const revokeAll = element("button", "quiet text-small");
+      revokeAll.type = "button";
+      revokeAll.append(textElement("kbd", "hint", "⇧X"), ` Revoke all ${sessionGrants.length}`);
+      revokeAll.setAttribute("aria-label", `Revoke all session approvals for ${label}`);
+      revokeAll.addEventListener("click", () => void revoke(sessionGrants.map(grantID)));
+      head.append(textElement("h2", "session-name break-anywhere", label), revokeAll);
+      group.append(head, ...shown.map(grantRow));
+      groups.push(group);
+    }
+    return groups;
+  }
+
+  function grantID(grant) {
+    return String(grant.id ?? "");
+  }
+
+  function grantRow(grant) {
+    const row = element("div", "list-row grant-row");
+    row.tabIndex = -1;
+    row.dataset.requestId = grantID(grant);
+    const revokeButton = element("button", "quiet text-small");
     revokeButton.type = "button";
-    revokeButton.disabled = !connected;
+    revokeButton.append(textElement("kbd", "hint", "x"), " Revoke");
     revokeButton.setAttribute(
       "aria-label",
       `Revoke session approval for ${safeInline(displayArgs(grant.args), 100)}`,
     );
-    revokeButton.addEventListener("click", () => void revoke(String(grant.id ?? "")));
-    row.append(details, revokeButton);
+    revokeButton.addEventListener("click", () => void revoke([grantID(grant)]));
+    row.append(
+      textElement("code", "break-anywhere pre-wrap", displayArgs(grant.args)),
+      textElement("span", "text-small text-muted", `approved ${shortTime(grant.created_at)}`),
+      revokeButton,
+    );
+    addRow(row, { grant });
     return row;
+  }
+
+  function historyRows() {
+    return [...approvals.recent.values()]
+      .sort((left, right) => {
+        return timestamp(right.resolution?.resolved_at) - timestamp(left.resolution?.resolved_at);
+      })
+      .filter((approval) => {
+        const request = commandRequest(approval);
+        return matchesFilter(
+          displayArgs(request.args),
+          sessionLabel(request),
+          stateLabel(approval.state),
+          approval.resolution?.reason,
+        );
+      })
+      .map(historyRow);
+  }
+
+  function historyRow(approval) {
+    const request = commandRequest(approval);
+    const id = requestID(approval);
+    const button = element("button", "list-row history-row");
+    button.type = "button";
+    button.dataset.requestId = id;
+    const resolved = approval.resolution?.resolved_at;
+    const time = textElement("time", "text-small text-muted", shortTime(resolved));
+    time.dateTime = String(resolved ?? "");
+    time.title = fullTime(resolved);
+    button.setAttribute(
+      "aria-label",
+      `${stateLabel(approval.state)}: ${commandTitle(approval)}, ${fullTime(resolved)}`,
+    );
+    const how = safeInline(approval.resolution?.reason, 80);
+    button.append(
+      textElement("span", `mini-stamp text-small ${approval.state}`, stateLabel(approval.state)),
+      textElement("code", "break-anywhere", safeInline(displayArgs(request.args), 200)),
+      time,
+      textElement(
+        "span",
+        "history-meta text-small text-muted",
+        how ? `${sessionLabel(request)}, ${how}` : sessionLabel(request),
+      ),
+    );
+    button.addEventListener("click", () => openHistory(id));
+    addRow(button, { approval });
+    return button;
   }
 
   function metadataItem(label, value) {
@@ -463,7 +619,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderSheet(approval) {
     $("sheet").hidden = !approval;
-    $("empty-sheet").hidden = !!approval;
     if (!approval) {
       renderedID = "";
       return;
@@ -553,20 +708,29 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function revoke(id) {
-    if (!connected || !id) return;
+  // One DELETE per grant; a session holds at most as many grants as the store keeps.
+  async function revoke(ids) {
+    if (ids.length === 0 || ids.some((id) => !id)) return;
+    if (!connected) {
+      notice("Disconnected. Revoke again once the dashboard reconnects.");
+      return;
+    }
     try {
-      const response = await fetch(`/api/v1/grants/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        credentials: "omit",
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok && response.status !== 404) {
-        throw new Error(`revoke returned HTTP ${response.status}`);
+      for (const id of ids) {
+        const response = await fetch(`/api/v1/grants/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          credentials: "omit",
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`revoke returned HTTP ${response.status}`);
+        }
       }
-      announce("Session approval revoked.");
+      notice(
+        ids.length === 1 ? "Session approval revoked." : `${ids.length} session approvals revoked.`,
+      );
     } catch (error) {
-      announce(`Could not revoke session approval: ${safeInline(error.message, 160)}`);
+      notice(`Could not revoke session approval: ${safeInline(error.message, 160)}`);
     } finally {
       void refreshSnapshot();
     }
@@ -645,6 +809,12 @@ document.addEventListener("DOMContentLoaded", () => {
       return true;
     }
     if ($("help").open) return false;
+    const viewKeys = { p: "pending", s: "sessions", h: "history" };
+    if (viewKeys[key]) {
+      showView(viewKeys[key]);
+      return true;
+    }
+    if (view !== "pending") return handleListKey(key, shift);
     if (key === "j" || key === "ArrowDown" || key === "ArrowRight") return moveSelection(1);
     if (key === "k" || key === "ArrowUp" || key === "ArrowLeft") return moveSelection(-1);
     if (/^[1-9]$/.test(key)) {
@@ -657,7 +827,7 @@ document.addEventListener("DOMContentLoaded", () => {
       $("details").open = !$("details").open;
       return true;
     }
-    if (selectedApproval()?.state !== "pending") return false;
+    if (shownApproval()?.state !== "pending") return false;
     if (key === "n") {
       void decide(selectedID, "denied");
       return true;
@@ -667,6 +837,51 @@ document.addEventListener("DOMContentLoaded", () => {
       return true;
     }
     return false;
+  }
+
+  function handleListKey(key, shift) {
+    if (openedID) {
+      if (key === "Escape") {
+        closeHistory();
+        return true;
+      }
+      if (key === "i") {
+        $("details").open = !$("details").open;
+        return true;
+      }
+      return false;
+    }
+    if (key === "/") {
+      $("filter").focus();
+      return true;
+    }
+    if (key === "Escape" && filterText) {
+      clearFilter();
+      return true;
+    }
+    if (key === "j" || key === "ArrowDown") return moveRow(1);
+    if (key === "k" || key === "ArrowUp") return moveRow(-1);
+    const row = rows[rowIndex];
+    if (!row) return false;
+    // A focused row opens itself through its own click.
+    if (key === "Enter" && row.approval && document.activeElement === document.body) {
+      openHistory(requestID(row.approval));
+      return true;
+    }
+    if (key === "x" && row.grant) {
+      const sessionID = row.grant.session_id;
+      const chosen = shift ? grants.filter((grant) => grant.session_id === sessionID) : [row.grant];
+      void revoke(chosen.map(grantID));
+      return true;
+    }
+    return false;
+  }
+
+  function clearFilter() {
+    filterText = "";
+    $("filter").value = "";
+    rowIndex = 0;
+    renderList();
   }
 
   function onKeyDown(event) {
@@ -730,7 +945,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const clock = item.querySelector(".clock");
       if (clock) clock.textContent = duration(remaining);
     });
-    const approval = selectedApproval();
+    const approval = approvals.pending.get(selectedID);
     $("approve").disabled = !canDecide(approval);
     $("approve-session").disabled = !canDecide(approval);
     $("deny").disabled = !canDecide(approval);
@@ -817,6 +1032,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.focus();
         notification.close();
         if (approvals.pending.has(id)) {
+          showView("pending");
           selectRequest(id);
           const card = $("sheet");
           const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -888,6 +1104,23 @@ document.addEventListener("DOMContentLoaded", () => {
   $("approve").addEventListener("click", () => approveByClick("once"));
   $("approve-session").addEventListener("click", () => approveByClick("session"));
   $("deny").addEventListener("click", () => void decide(selectedID, "denied"));
+  $("back").addEventListener("click", closeHistory);
+  $("filter").addEventListener("input", () => {
+    filterText = $("filter").value;
+    rowIndex = 0;
+    renderList();
+  });
+  $("filter").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") clearFilter();
+    if (event.key === "Escape" || event.key === "Enter") {
+      event.preventDefault();
+      $("filter").blur();
+    }
+  });
+  window.addEventListener("hashchange", () => {
+    const name = viewFromHash();
+    if (name) setView(name);
+  });
   $("shortcuts").addEventListener("change", () => {
     shortcutsOn = $("shortcuts").checked;
     try {
@@ -897,6 +1130,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.addEventListener("keydown", onKeyDown);
   window.addEventListener("focus", arm);
+  view = viewFromHash() || "pending";
   applyShortcuts();
   configureNotifications();
   render();
