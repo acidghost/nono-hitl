@@ -186,6 +186,16 @@ code {
   overflow-wrap: anywhere;
 }
 
+kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  padding-inline: var(--space-xs);
+  border: var(--stroke-thin) solid currentColor;
+  font: var(--weight-normal) var(--text-small) / var(--leading-body) var(--mono);
+  text-align: center;
+  opacity: 0.75;
+}
+
 /* Utilities: nested rows reset their gap; components only override when needed. */
 .row {
   --row-gap: var(--space-md);
@@ -565,10 +575,16 @@ code {
 }
 
 .actions button {
+  position: relative;
+  overflow: hidden;
   padding: 0 var(--space-md);
   font-weight: var(--weight-bold);
   border: var(--stroke-strong) solid var(--rule);
   background: var(--paper);
+}
+
+.actions kbd {
+  margin-right: var(--space-sm);
 }
 
 .actions .button-deny {
@@ -584,11 +600,6 @@ code {
   box-shadow: var(--raised-shadow);
 }
 
-.actions .approve img {
-  width: var(--space-md);
-  height: var(--space-md);
-}
-
 .actions button:hover:not(:disabled) {
   outline: var(--stroke-strong) solid var(--rule);
   outline-offset: var(--stroke-thin);
@@ -601,6 +612,37 @@ code {
 
 .actions button:disabled {
   box-shadow: none;
+}
+
+/* Approve buttons fill up while arming; the duration matches armMilliseconds in app.js. */
+.arming .armed {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.arming .armed::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: var(--space-xs);
+  background: currentColor;
+  transform-origin: left;
+  animation: arm 1s linear forwards;
+}
+
+@keyframes arm {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.actions .pressing {
+  outline: var(--stroke-strong) solid var(--stack);
+  outline-offset: var(--stroke-strong);
 }
 
 .terminal p {
@@ -805,6 +847,52 @@ details[open] > summary::before {
   gap: var(--space-sm);
   margin: 0 0 var(--space-md);
   padding-left: var(--space-md);
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-xs) var(--space-md);
+  margin: var(--space-sm) 0 var(--space-md);
+}
+
+.keys div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.keys dt {
+  min-width: var(--label-width);
+  text-align: right;
+}
+
+.keys dd {
+  margin: 0;
+}
+
+.help-settings {
+  flex-wrap: wrap;
+  padding-top: var(--space-sm);
+  border-top: var(--stroke-thin) solid var(--sheet-rule);
+}
+
+/* Key hints disappear with the shortcuts they describe. */
+[data-shortcuts="off"] .hint {
+  display: none;
+}
+
+.toast {
+  position: fixed;
+  right: var(--space-md);
+  bottom: var(--space-md);
+  max-width: min(32rem, calc(100% - var(--space-lg)));
+  padding: var(--space-sm) var(--space-md);
+  background: var(--paper);
+  border: var(--stroke-strong) solid var(--ink);
+  border-left: calc(var(--stroke-strong) * 3) solid var(--outcome-color, var(--ink));
+  box-shadow: var(--raised-shadow);
+  overflow-wrap: anywhere;
 }
 
 /* Accessibility geometry is deliberately outside the visual spacing scale. */

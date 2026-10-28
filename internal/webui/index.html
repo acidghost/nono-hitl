@@ -65,10 +65,17 @@
                 <div class="action-row row">
                   <span class="scope text-small text-muted" id="scope"></span>
                   <div class="actions row gap-small">
-                    <button class="deny button-deny" id="deny" type="button" disabled>Deny</button
-                    ><button id="approve-session" type="button" disabled>Approve for session</button
-                    ><button class="approve row gap-small" id="approve" type="button" disabled>
-                      <img src="/assets/logo.svg" alt="" width="16" height="16">
+                    <button class="deny button-deny" id="deny" type="button" disabled>
+                      <kbd class="hint">n</kbd>Deny
+                    </button><button class="armed" id="approve-session" type="button" disabled>
+                      <kbd class="hint">⇧Y</kbd>Approve for session
+                    </button><button
+                      class="approve armed row gap-small"
+                      id="approve"
+                      type="button"
+                      disabled
+                    >
+                      <kbd class="hint">y</kbd>
                       <span>Approve once</span>
                     </button>
                   </div>
@@ -129,19 +136,65 @@
         </li>
         <li>Decisions are kept in memory and cleared when the service restarts.</li>
         <li>
+          Approve keys work one second after a request appears, and only after a pause in typing, so
+          text meant for the terminal can't approve anything.
+        </li>
+        <li>
           Listening on <code id="listener">127.0.0.1</code>. Run this service outside the agent
           sandbox.
         </li>
       </ul>
-      <label class="theme-picker row gap-small" for="color-theme"
-        >Theme
-        <select id="color-theme">
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select></label
-      >
+      <h3 class="text-body">Keyboard</h3>
+      <dl class="keys">
+        <div>
+          <dt><kbd>j</kbd> <kbd>k</kbd></dt>
+          <dd>Next or previous request</dd>
+        </div>
+        <div>
+          <dt><kbd>1</kbd> to <kbd>9</kbd></dt>
+          <dd>Jump to a request</dd>
+        </div>
+        <div>
+          <dt><kbd>y</kbd></dt>
+          <dd>Approve once</dd>
+        </div>
+        <div>
+          <dt><kbd>⇧Y</kbd></dt>
+          <dd>Approve for session</dd>
+        </div>
+        <div>
+          <dt><kbd>n</kbd></dt>
+          <dd>Deny</dd>
+        </div>
+        <div>
+          <dt><kbd>i</kbd></dt>
+          <dd>Details</dd>
+        </div>
+        <div>
+          <dt><kbd>?</kbd></dt>
+          <dd>This help</dd>
+        </div>
+        <div>
+          <dt><kbd>Esc</kbd></dt>
+          <dd>Close</dd>
+        </div>
+      </dl>
+      <div class="help-settings row">
+        <label class="row gap-small" for="shortcuts"
+          ><input type="checkbox" id="shortcuts" checked>
+          Keyboard shortcuts</label
+        >
+        <label class="theme-picker row gap-small" for="color-theme"
+          >Theme
+          <select id="color-theme">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select></label
+        >
+      </div>
     </dialog>
+    <div class="toast" id="toast" aria-hidden="true" hidden></div>
     <div id="live" class="sr-only" role="status" aria-live="polite"></div>
   </body>
 </html>

@@ -40,6 +40,11 @@
 // The script runs in the head; dashboard elements are available after parsing.
 document.addEventListener("DOMContentLoaded", () => {
   const clipLength = 120;
+  // Approve keys and buttons wait this long after the shown request changes or the window
+  // gains focus, and approve keys need this much quiet before and after the keypress.
+  const armMilliseconds = 1000;
+  const quietMilliseconds = 300;
+  const shortcutsKey = "nono-hitl-shortcuts";
   const $ = (id) => document.getElementById(id);
   const elements = { notifications: $("notification"), actionStatus: $("live") };
   const approvals = { pending: new Map(), recent: new Map() };
@@ -54,6 +59,15 @@ document.addEventListener("DOMContentLoaded", () => {
   let eventSource;
   let stateVersion = 0;
   let snapshotInFlight = false;
+  let armedAt = 0;
+  let armTimer;
+  let lastKeyAt = Number.NEGATIVE_INFINITY;
+  let queued;
+  let toastTimer;
+  let shortcutsOn = true;
+  try {
+    shortcutsOn = localStorage.getItem(shortcutsKey) !== "off";
+  } catch {}
 
   function requestID(approval) {
     return String(approval?.envelope?.request?.request_id ?? "");
@@ -145,16 +159,31 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // A resolved request leaves the card; the next pending one takes its place and re-arms.
   function applyResolved(approval) {
     const id = requestID(approval);
     if (!id) return;
-    const focusReview = id === selectedID && $("pending-actions").contains(document.activeElement);
+    const shown = id === selectedID && approvals.pending.has(id);
+    const focusReview = shown && $("pending-actions").contains(document.activeElement);
+    if (shown) selectedID = neighbourOf(id);
     approvals.pending.delete(id);
     approvals.recent.set(id, approval);
     feedback.delete(id);
     render();
     if (focusReview) $("review").focus({ preventScroll: true });
-    announce(`${stateLabel(approval.state)}: ${commandTitle(approval)}`);
+    notice(`${stateLabel(approval.state)}: ${commandTitle(approval)}`, approval.state);
+  }
+
+  function sortedPending() {
+    return [...approvals.pending.values()].sort((left, right) => {
+      return timestamp(left.created_at) - timestamp(right.created_at);
+    });
+  }
+
+  function neighbourOf(id) {
+    const pending = sortedPending();
+    const index = pending.findIndex((approval) => requestID(approval) === id);
+    return requestID(pending[index + 1] ?? pending[index - 1]);
   }
 
   function applyGrants(list) {
@@ -248,9 +277,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function render() {
-    const pending = [...approvals.pending.values()].sort((left, right) => {
-      return timestamp(left.created_at) - timestamp(right.created_at);
-    });
+    const pending = sortedPending();
     const recent = [...approvals.recent.values()].sort((left, right) => {
       return timestamp(right.resolution?.resolved_at) - timestamp(left.resolution?.resolved_at);
     });
@@ -259,13 +286,16 @@ document.addEventListener("DOMContentLoaded", () => {
     $("history-empty").hidden = recent.length !== 0;
     replaceSelectors(
       $("queue-items"),
-      pending.map((approval) => {
+      pending.map((approval, index) => {
         const button = selector(approval, "queue-item");
         button.dataset.deadline = approval.deadline;
         button.dataset.created = approval.created_at;
+        const command = element("span", "queue-command");
+        if (index < 9) command.append(textElement("kbd", "hint", String(index + 1)), " ");
+        command.append(commandTitle(approval));
         button.append(
           element("span", "deadline-bar"),
-          textElement("span", "queue-command", commandTitle(approval)),
+          command,
           textElement("span", "clock text-small", ""),
           textElement(
             "span",
@@ -439,11 +469,12 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     const id = requestID(approval);
+    const waiting = approval.state === "pending";
     if (id !== renderedID) {
       renderRequest(approval);
       renderedID = id;
+      if (waiting) arm();
     }
-    const waiting = approval.state === "pending";
     const sheet = $("sheet");
     sheet.dataset.state = approval.state;
     sheet.setAttribute("aria-busy", String(sending.has(id)));
@@ -483,10 +514,10 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
 
-  async function decide(decision, scope = "once") {
-    const approval = selectedApproval();
+  // The request ID is pinned when the user acts, never read back from the selection later.
+  async function decide(id, decision, scope = "once") {
+    const approval = approvals.pending.get(id);
     if (!canDecide(approval)) return;
-    const id = requestID(approval);
     sending.add(id);
     feedback.set(id, decision === "granted" ? "Approving…" : "Denying…");
     const reasons = {
@@ -539,6 +570,151 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       void refreshSnapshot();
     }
+  }
+
+  function arm() {
+    if (queued) cancelQueued();
+    armedAt = performance.now() + armMilliseconds;
+    const actions = $("pending-actions").querySelector(".actions");
+    actions.classList.remove("arming");
+    void actions.offsetWidth; // Restarts the fill animation.
+    actions.classList.add("arming");
+    window.clearTimeout(armTimer);
+    armTimer = window.setTimeout(() => actions.classList.remove("arming"), armMilliseconds);
+  }
+
+  function isArmed() {
+    return performance.now() >= armedAt;
+  }
+
+  function approveByClick(scope) {
+    if (!isArmed()) {
+      notice("Not armed yet. Wait for the bar to fill.");
+      return;
+    }
+    void decide(selectedID, "granted", scope);
+  }
+
+  // Fires after a quiet window, so typing that lands in the browser can't approve.
+  function approveByKey(scope, gap) {
+    const id = selectedID;
+    const button = $(scope === "session" ? "approve-session" : "approve");
+    if (button.disabled) return;
+    if (gap < quietMilliseconds) {
+      notice("Typing detected. Shortcut ignored.");
+      return;
+    }
+    if (!isArmed()) {
+      notice("Not armed yet. Wait for the bar to fill.");
+      return;
+    }
+    button.classList.add("pressing");
+    queued = {
+      button,
+      timer: window.setTimeout(() => {
+        queued = undefined;
+        button.classList.remove("pressing");
+        void decide(id, "granted", scope);
+      }, quietMilliseconds),
+    };
+  }
+
+  function cancelQueued() {
+    window.clearTimeout(queued.timer);
+    queued.button.classList.remove("pressing");
+    queued = undefined;
+  }
+
+  function moveSelection(step) {
+    const pending = sortedPending();
+    if (pending.length === 0) return false;
+    const index = pending.findIndex((approval) => requestID(approval) === selectedID);
+    const next = index < 0 ? 0 : Math.max(0, Math.min(pending.length - 1, index + step));
+    selectRequest(requestID(pending[next]));
+    return true;
+  }
+
+  function toggleHelp() {
+    if ($("help").open) $("help").close();
+    else $("help").showModal();
+  }
+
+  function handleKey(key, shift, gap) {
+    if (key === "?") {
+      toggleHelp();
+      return true;
+    }
+    if ($("help").open) return false;
+    if (key === "j" || key === "ArrowDown" || key === "ArrowRight") return moveSelection(1);
+    if (key === "k" || key === "ArrowUp" || key === "ArrowLeft") return moveSelection(-1);
+    if (/^[1-9]$/.test(key)) {
+      const target = sortedPending()[Number(key) - 1];
+      if (target) selectRequest(requestID(target));
+      return true;
+    }
+    if ($("sheet").hidden) return false;
+    if (key === "i") {
+      $("details").open = !$("details").open;
+      return true;
+    }
+    if (selectedApproval()?.state !== "pending") return false;
+    if (key === "n") {
+      void decide(selectedID, "denied");
+      return true;
+    }
+    if (key === "y") {
+      approveByKey(shift ? "session" : "once", gap);
+      return true;
+    }
+    return false;
+  }
+
+  function onKeyDown(event) {
+    if (["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(event.key)) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+    const now = performance.now();
+    const gap = now - lastKeyAt;
+    lastKeyAt = now;
+    if (queued) {
+      cancelQueued();
+      notice("Typing detected. Shortcut ignored.");
+      event.preventDefault();
+      return;
+    }
+    if (!shortcutsOn || event.repeat) return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest("input:not([type='checkbox']), select, textarea")
+    ) {
+      return;
+    }
+    // Letters match either case so Caps Lock can't change scope; only Shift does.
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    if (handleKey(key, event.shiftKey, gap)) event.preventDefault();
+  }
+
+  function applyShortcuts() {
+    document.documentElement.dataset.shortcuts = shortcutsOn ? "on" : "off";
+    $("shortcuts").checked = shortcutsOn;
+    const keys = { deny: "n", "approve-session": "Shift+Y", approve: "y" };
+    for (const [id, key] of Object.entries(keys)) {
+      if (shortcutsOn) $(id).setAttribute("aria-keyshortcuts", key);
+      else $(id).removeAttribute("aria-keyshortcuts");
+    }
+  }
+
+  // Visible confirmation; the live region reads out the same text.
+  function notice(message, state = "") {
+    const toast = $("toast");
+    toast.textContent = message;
+    toast.dataset.state = state;
+    toast.hidden = false;
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => {
+      toast.hidden = true;
+    }, 3000);
+    announce(message);
   }
 
   // Tabs and the card carry their deadline; the bar drains and the clock counts down.
@@ -709,9 +885,19 @@ document.addEventListener("DOMContentLoaded", () => {
   $("listener").textContent = window.location.host;
   $("help-open").addEventListener("click", () => $("help").showModal());
   $("help-close").addEventListener("click", () => $("help").close());
-  $("approve").addEventListener("click", () => void decide("granted"));
-  $("approve-session").addEventListener("click", () => void decide("granted", "session"));
-  $("deny").addEventListener("click", () => void decide("denied"));
+  $("approve").addEventListener("click", () => approveByClick("once"));
+  $("approve-session").addEventListener("click", () => approveByClick("session"));
+  $("deny").addEventListener("click", () => void decide(selectedID, "denied"));
+  $("shortcuts").addEventListener("change", () => {
+    shortcutsOn = $("shortcuts").checked;
+    try {
+      localStorage.setItem(shortcutsKey, shortcutsOn ? "on" : "off");
+    } catch {}
+    applyShortcuts();
+  });
+  document.addEventListener("keydown", onKeyDown);
+  window.addEventListener("focus", arm);
+  applyShortcuts();
   configureNotifications();
   render();
   setConnection("connecting", "Connecting");
