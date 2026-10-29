@@ -374,6 +374,19 @@ just check
 Biome is development tooling only; the embedded dashboard has no runtime
 JavaScript or CSS dependency downloads.
 
+The browser tests in `internal/webui/e2e` drive the dashboard in Chromium
+against a fresh binary, one server per test, and check the decision nono
+receives. CI runs them too. Both recipes install Chromium on first use:
+
+```sh
+just e2e
+just screenshots
+```
+
+`just screenshots` compares light and dark screenshots of the main dashboard
+states with local baselines that stay out of git. Take them on a known-good
+commit with `just screenshots --update-snapshots`.
+
 ## License
 
 [The Unlicense](UNLICENSE)

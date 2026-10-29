@@ -33,3 +33,9 @@ go.work.sum
 
 # Build output
 /build
+
+# Web UI
+node_modules/
+/internal/webui/test-results/
+# Screenshot baselines are local only.
+/internal/webui/e2e/__screenshots__/
