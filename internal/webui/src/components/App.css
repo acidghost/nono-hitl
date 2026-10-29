@@ -1,0 +1,155 @@
+/* Rules shared across components. App.tsx imports this first, so the files that follow it in
+ * the bundle can rely on coming later in the components layer. */
+@layer components {
+  /* One semantic color feeds the request dot and both stamp sizes. */
+  .granted,
+  [data-state="granted"] {
+    --outcome-color: var(--approved);
+  }
+
+  .denied,
+  [data-state="denied"] {
+    --outcome-color: var(--danger);
+  }
+
+  .expired,
+  .canceled,
+  [data-state="expired"],
+  [data-state="canceled"] {
+    --outcome-color: var(--muted);
+  }
+
+  .skip {
+    position: absolute;
+    left: var(--space-md);
+    top: var(--space-md);
+    padding: var(--space-sm);
+    background: var(--paper);
+    transform: translateY(calc(-100% - var(--space-lg)));
+    z-index: 1;
+
+    &:focus {
+      transform: none;
+    }
+  }
+
+  .app {
+    --app-inset: var(--space-lg);
+    max-width: var(--page-width);
+    margin: 0 auto;
+    padding-inline: var(--app-inset);
+    padding-bottom: var(--space-lg);
+  }
+
+  .quiet {
+    border: var(--stroke-thin) solid var(--rule);
+    padding: var(--space-xs) var(--space-sm);
+    background: transparent;
+
+    &:hover:not(:disabled) {
+      background: var(--wash);
+    }
+  }
+
+  /* Deadline bars and clocks, on the queue tabs and the card. */
+  .clock {
+    font-weight: var(--weight-bold);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .deadline-bar {
+    height: var(--space-xs);
+    background: var(--wash);
+
+    &::before {
+      content: "";
+      display: block;
+      height: 100%;
+      width: calc(var(--left, 1) * 100%);
+      background: var(--stack);
+    }
+  }
+
+  .urgent .deadline-bar::before {
+    background: var(--warning);
+  }
+
+  .offline-banner {
+    margin-bottom: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--offline-bg);
+    border: var(--stroke-thin) solid var(--danger-rule);
+    color: var(--offline-text);
+  }
+
+  .empty-sheet {
+    padding: var(--space-lg);
+
+    & h2 {
+      margin-bottom: var(--space-sm);
+    }
+
+    & p {
+      max-width: var(--measure-long);
+    }
+  }
+
+  /* Sessions and History: filter on top, rows below, the current row marked on its left edge. */
+  .filter {
+    margin-bottom: var(--space-md);
+
+    & input {
+      flex: 1;
+      min-height: var(--control-size);
+      padding-inline: var(--space-sm);
+      background: var(--paper);
+      color: var(--text);
+      border: var(--stroke-thin) solid var(--rule);
+      border-radius: 0;
+    }
+  }
+
+  .list-row {
+    display: grid;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    background: transparent;
+    border: 0;
+    border-top: var(--stroke-thin) solid var(--sheet-rule);
+    text-align: left;
+
+    &[aria-current="true"] {
+      background: var(--wash);
+      box-shadow: inset var(--space-xs) 0 0 var(--ink);
+    }
+  }
+
+  .list-empty {
+    padding: var(--space-md);
+    border: var(--stroke-thin) dashed var(--rule);
+  }
+
+  /* Key hints disappear with the shortcuts they describe. */
+  [data-shortcuts="off"] .hint {
+    display: none;
+  }
+
+  /* Compact desk: reduce gutters. */
+  @media (max-width: 64rem) {
+    .app {
+      --app-inset: var(--space-md);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none;
+      transition: none;
+      scroll-behavior: auto;
+    }
+  }
+}

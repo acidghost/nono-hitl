@@ -1,0 +1,89 @@
+/*
+ * Internal UI scale: four spacing steps, four type sizes, three weights.
+ * Reuse these steps rather than adding a token for each component's old value.
+ * Structural widths, touch targets and accessibility geometry are the exceptions.
+ * Breakpoints: 64rem (compact desk), 40rem (single column).
+ */
+@layer tokens {
+  :root {
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 2rem;
+
+    --text-small: 0.75rem;
+    --text-body: 0.875rem;
+    --text-heading: 1.25rem;
+    --text-display: 2rem;
+    --weight-normal: 400;
+    --weight-medium: 600;
+    --weight-bold: 800;
+    --leading-body: 1.5;
+    --leading-heading: 1.2;
+    --tracking-heading: -0.03em;
+    --sans: "Helvetica Neue", Arial, sans-serif;
+    --mono: Menlo, Consolas, monospace;
+
+    --measure-short: 16ch;
+    --measure-medium: 32ch;
+    --measure-long: 64ch;
+    --page-width: 64rem;
+    --label-width: 6rem;
+    /* A single 36px minimum target for buttons, selects and disclosure rows, above WCAG's 24px. */
+    --control-size: 2.25rem;
+    --stroke-thin: 1px;
+    --stroke-strong: 2px;
+    --disabled-opacity: 0.5;
+
+    --desk: #76e6bd;
+    --paper: #ffffff;
+    --text: #173f32;
+    --muted: #355e4f;
+    --rule: #3f8068;
+    --ink: #173f32;
+    --wash: #e7f9f1;
+    --sheet-rule: #b7d4c5;
+    --queue-bg: #8becc9;
+    --selected-bg: var(--paper);
+    --selected-ink: #173f32;
+    --selected-meta: #355e4f;
+    --history-hover: #c6f9e6;
+    --stack: #319e7c;
+    --approval-bg: var(--ink);
+    --approval-text: var(--paper);
+    --approved: #23664f;
+    --danger: #8a3849;
+    --danger-rule: #b99397;
+    --warning: #725017;
+    --warning-bg: #fbf0d6;
+    --offline-bg: #f5e9ec;
+    --offline-text: #78383d;
+    --focus: var(--selected-ink);
+    --raised-shadow: var(--space-xs) var(--space-xs) 0 var(--stack);
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    --desk: #12392e;
+    --paper: #204c3d;
+    --text: #ecf9f1;
+    --muted: #b7d4c5;
+    --rule: #649b83;
+    --ink: #76e6bd;
+    --wash: #194334;
+    --sheet-rule: var(--rule);
+    --queue-bg: var(--wash);
+    --selected-bg: #b3f5dc;
+    --history-hover: #255b46;
+    --approval-text: var(--selected-ink);
+    --approved: #b3f5dc;
+    --danger: #ffb8c8;
+    --danger-rule: #c490a0;
+    --warning: #f1d49c;
+    --warning-bg: #3a3a21;
+    --offline-bg: #512b37;
+    --offline-text: #ffdae5;
+    --focus: var(--selected-bg);
+    color-scheme: dark;
+  }
+}

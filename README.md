@@ -30,7 +30,9 @@ See [Threat model](#threat-model) before using the service with an agent.
 
 ## Quick start
 
-Build and run the service from a trusted host terminal:
+Build and run the service from a trusted host terminal. The build needs Go, bun
+and just; `mise install` sets up the versions pinned in
+[`mise.toml`](mise.toml).
 
 ```sh
 just install
@@ -359,6 +361,7 @@ just lint
 just vet
 just test
 just test -race
+just web-test
 just build
 just build-all
 just run --help
@@ -371,8 +374,15 @@ just check
 ```
 
 `build-all` cross-compiles static Darwin ARM64 and Linux ARM64/AMD64 binaries.
-Biome is development tooling only; the embedded dashboard has no runtime
-JavaScript or CSS dependency downloads.
+
+The dashboard is Preact components written in TSX, in `internal/webui/src`. bun
+bundles them into `internal/webui/dist`, which the binary embeds, so every
+recipe that compiles Go runs `just web` first. The page loads nothing from
+outside the binary. `just web-test` runs the unit tests for its pure helpers.
+
+`just dev` runs the server from source with the dashboard read from disk, while
+bun rebuilds it on every change. Refresh the browser to see an edit; pending
+requests survive because the server keeps running.
 
 The browser tests in `internal/webui/e2e` drive the dashboard in Chromium
 against a fresh binary, one server per test, and check the decision nono

@@ -1,0 +1,53 @@
+/* Resolved requests, one row each, with the outcome stamped on the left. */
+@layer components {
+  .list {
+    margin-bottom: var(--space-md);
+    background: var(--paper);
+    border: var(--stroke-thin) solid var(--rule);
+
+    & .list-row:first-child {
+      border-top: 0;
+    }
+  }
+
+  .history-row {
+    grid-template-columns: 6rem minmax(0, 1fr) auto;
+
+    &:hover {
+      background: var(--history-hover);
+    }
+  }
+
+  .history-meta {
+    grid-column: 2 / -1;
+  }
+
+  .mini-stamp {
+    color: var(--outcome-color, var(--approved));
+    font-weight: var(--weight-bold);
+    display: inline-block;
+    justify-self: start;
+    border: var(--stroke-thin) solid currentColor;
+    padding: 0 var(--space-xs);
+  }
+
+  .back {
+    margin-bottom: var(--space-sm);
+  }
+
+  /* Single column: the argv takes its own line under the stamp and time. */
+  @media (max-width: 40rem) {
+    .history-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+
+      & code {
+        grid-column: 1 / -1;
+        grid-row: 2;
+      }
+    }
+
+    .history-meta {
+      grid-column: 1 / -1;
+    }
+  }
+}

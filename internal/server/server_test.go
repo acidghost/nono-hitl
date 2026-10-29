@@ -71,7 +71,7 @@ func TestHostAndSecurityHeaders(t *testing.T) {
 	}
 }
 
-func TestDashboardServesEmbeddedAssetsWithoutUnsafeRendering(t *testing.T) {
+func TestDashboardServesEmbeddedAssets(t *testing.T) {
 	t.Parallel()
 
 	service, _ := newTestServer(t, nil)
@@ -80,9 +80,10 @@ func TestDashboardServesEmbeddedAssetsWithoutUnsafeRendering(t *testing.T) {
 		contentType string
 		marker      string
 	}{
-		{path: "/", contentType: "text/html; charset=utf-8", marker: "Enable notifications"},
-		{path: "/assets/app.js", contentType: "text/javascript; charset=utf-8", marker: "new EventSource"},
-		{path: "/assets/style.css", contentType: "text/css; charset=utf-8", marker: ".button-deny"},
+		{path: "/", contentType: "text/html; charset=utf-8", marker: `<div id="app">`},
+		{path: "/assets/theme.js", contentType: "text/javascript; charset=utf-8", marker: "nono-hitl-mint-theme"},
+		{path: "/assets/app.js", contentType: "text/javascript; charset=utf-8", marker: "Enable notifications"},
+		{path: "/assets/app.css", contentType: "text/css; charset=utf-8", marker: ".button-deny"},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
@@ -100,10 +101,6 @@ func TestDashboardServesEmbeddedAssetsWithoutUnsafeRendering(t *testing.T) {
 		})
 	}
 
-	script := performRequest(service, http.MethodGet, "/assets/app.js", "", nil).Body.String()
-	if strings.Contains(script, "innerHTML") || !strings.Contains(script, "textContent") {
-		t.Fatal("dashboard script must render untrusted values with textContent, not innerHTML")
-	}
 	post := performRequest(service, http.MethodPost, "/", "", nil)
 	if post.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST dashboard status = %d, want %d", post.Code, http.StatusMethodNotAllowed)

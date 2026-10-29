@@ -6,6 +6,7 @@
 
 build
 **/node_modules
+internal/webui/dist
 internal/webui/e2e
 internal/webui/test-results
 *.out

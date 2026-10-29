@@ -1,44 +1,47 @@
-// Package webui embeds the dependency-free local approval dashboard.
+// Package webui embeds the local approval dashboard, bundled from src/ by bun into dist/.
 package webui
 
 import (
-	_ "embed"
+	"embed"
+	"io/fs"
 	"net/http"
 )
 
-var (
-	//go:embed index.html
-	indexHTML []byte
+// Without a bun build, go build fails here on missing dist/ files, so no binary ships
+// without its UI.
+//
+//go:embed index.html logo.svg dist/app.js dist/app.css dist/theme.js
+var embedded embed.FS
 
-	//go:embed app.js
-	appJS []byte
+var files fs.FS = embedded
 
-	//go:embed style.css
-	styleCSS []byte
-
-	//go:embed logo.svg
-	logoSVG []byte
-)
-
-// Handler serves the fixed set of embedded dashboard assets.
+// Handler serves the fixed set of dashboard assets.
 func Handler() http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/":
-			serveAsset(writer, "text/html; charset=utf-8", indexHTML)
+			serveAsset(writer, "text/html; charset=utf-8", "index.html")
+		case "/assets/theme.js":
+			serveAsset(writer, "text/javascript; charset=utf-8", "dist/theme.js")
 		case "/assets/app.js":
-			serveAsset(writer, "text/javascript; charset=utf-8", appJS)
-		case "/assets/style.css":
-			serveAsset(writer, "text/css; charset=utf-8", styleCSS)
+			serveAsset(writer, "text/javascript; charset=utf-8", "dist/app.js")
+		case "/assets/app.css":
+			serveAsset(writer, "text/css; charset=utf-8", "dist/app.css")
 		case "/assets/logo.svg":
-			serveAsset(writer, "image/svg+xml", logoSVG)
+			serveAsset(writer, "image/svg+xml", "logo.svg")
 		default:
 			http.NotFound(writer, request)
 		}
 	})
 }
 
-func serveAsset(writer http.ResponseWriter, contentType string, content []byte) {
+func serveAsset(writer http.ResponseWriter, contentType, name string) {
+	content, err := fs.ReadFile(files, name)
+	if err != nil {
+		// Only the dev build reads from disk, where bun may be rewriting the file.
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writer.Header().Set("Content-Type", contentType)
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.WriteHeader(http.StatusOK)

@@ -32,7 +32,7 @@ build-image platform=goarch:
         --build-arg BUILD_COMMIT='{{commit_sha}}' \
         -t '{{container_image}}' .
 
-build os=goos arch=goarch: build-dir
+build os=goos arch=goarch: build-dir web
     CGO_ENABLED=0 GOOS={{os}} GOARCH={{arch}} \
         go build \
             -ldflags '{{ldflags}}' \
@@ -44,6 +44,15 @@ build-dir:
 run *args: build
     ./build/{{program}}-{{goos}}-{{goarch}} {{args}}
 
+# serves the UI from disk while bun rebuilds it on every change; refresh the browser to see it
+dev *args: web
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'kill 0' EXIT
+    (cd {{webui_dir}} && bun run build:app --watch) &
+    (cd {{webui_dir}} && bun run build:theme --watch) &
+    go run -tags dev . serve {{args}}
+
 vendor:
     go mod tidy
     go mod vendor
@@ -52,21 +61,29 @@ fmt:
     golangci-lint fmt
     biome format --write {{webui_dir}}
 
-lint:
+lint: web
     golangci-lint run
     biome check {{webui_dir}}
+    @if grep -rnE 'innerHTML|outerHTML|insertAdjacentHTML|dangerouslySetInnerHTML' {{webui_dir}}/src; then \
+        echo 'render untrusted values as text, not HTML' >&2; exit 1; fi
 
-test *args:
+test *args: web
     go test {{args}} ./...
 
-vet:
+vet: web
     go vet ./...
 
 web-install:
     cd {{webui_dir}} && bun install --frozen-lockfile
 
+web: web-install
+    cd {{webui_dir}} && bun run build
+
 typecheck: web-install
     cd {{webui_dir}} && bunx tsc --noEmit
+
+web-test *args: web-install
+    cd {{webui_dir}} && bun test {{args}}
 
 _browser: web-install
     cd {{webui_dir}} && ./node_modules/.bin/playwright install chromium
@@ -78,13 +95,13 @@ e2e *args: _browser build typecheck
 screenshots *args: _browser build typecheck
     cd {{webui_dir}} && NONO_HITL_BIN='{{host_binary}}' bunx playwright test --project light --project dark {{args}}
 
-check: lint vet test build
+check: lint typecheck web-test vet test build
 
 install: build
     cp -v './build/{{program}}-{{goos}}-{{goarch}}' "{{install_prefix}}/{{program}}"
 
 clean:
-    rm -rf build
+    rm -rf build {{webui_dir}}/dist
 
 help:
     @just --list

@@ -61,6 +61,42 @@ test("n denies", async ({ page, hitl, ui }) => {
   expect(await decision).toEqual(deniedInBrowser);
 });
 
+test("a clicked decision leaves nothing focused that acts on the next request", async ({
+  page,
+  hitl,
+  ui,
+}) => {
+  await ui.open();
+  const first = await hitl.submit(["git", "push"]);
+  const second = await hitl.submit(["git", "push", "--tags"]);
+  await ui.shown(first.id);
+  await ui.deny.click();
+  expect(await first.decision).toEqual(deniedInBrowser);
+
+  await ui.armed(second.id);
+  await expect(ui.deny).not.toBeFocused();
+  // Enter on a still-focused Deny button would deny the second request.
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(400);
+  await page.keyboard.press("y");
+  expect(await second.decision).toEqual(granted);
+});
+
+test("closing a history entry returns focus to its row", async ({ page, hitl, ui }) => {
+  await ui.open();
+  for (const argv of [["ls"], ["pwd"], ["id"]]) {
+    const { id, decision } = await hitl.submit(argv);
+    await hitl.decide(id, "denied", "Denied by the e2e suite");
+    await decision;
+  }
+  await page.keyboard.press("h");
+  await expect(ui.history).toHaveCount(3);
+  await ui.history.nth(1).click();
+  await expect(page.locator("#review")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(ui.history.nth(1)).toBeFocused();
+});
+
 test("shift+y approves the same argv until revoked", async ({ page, hitl, ui }) => {
   const argv = ["gh", "pr", "view", "42"];
   await ui.open();
@@ -82,6 +118,26 @@ test("shift+y approves the same argv until revoked", async ({ page, hitl, ui }) 
   await ui.shown(afterRevoke.id);
   await page.keyboard.press("n");
   expect(await afterRevoke.decision).toEqual(deniedInBrowser);
+});
+
+test("a grants event keeps the session rows in place", async ({ page, hitl, ui }) => {
+  const approveForSession = async (argv: string[]) => {
+    const { id, decision } = await hitl.submit(argv);
+    await hitl.decide(id, "granted", "Approved by the e2e suite", "session");
+    await decision;
+  };
+  await approveForSession(["gh", "pr", "view", "1"]);
+  await ui.open();
+  await page.keyboard.press("s");
+  await expect(ui.grants).toHaveCount(1);
+  const revoke = ui.grants.first().getByRole("button", { name: /^Revoke session approval/ });
+  await revoke.focus();
+  // A marker that only survives if the element itself does.
+  await revoke.evaluate((button) => button.setAttribute("data-e2e", "kept"));
+
+  await approveForSession(["gh", "pr", "view", "2"]);
+  await expect(ui.grants).toHaveCount(2);
+  await expect(page.locator('[data-e2e="kept"]')).toBeFocused();
 });
 
 test("typing in the filter triggers no shortcut", async ({ page, hitl, ui }) => {
