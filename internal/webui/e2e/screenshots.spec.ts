@@ -9,6 +9,11 @@ async function shoot(page: Page, name: string) {
   await page.locator("#toast").evaluate((toast: HTMLElement) => {
     toast.hidden = true;
   });
+  // Whether a scripted focus shows a ring is up to the browser's :focus-visible heuristic,
+  // which differs from run to run.
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
   await expect(page).toHaveScreenshot(`${name}.png`, {
     fullPage: true,
     // Countdowns, wall-clock times and the listener port change from run to run.
