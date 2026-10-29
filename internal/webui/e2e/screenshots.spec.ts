@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 
@@ -14,13 +13,18 @@ async function shoot(page: Page, name: string) {
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
+  // Countdowns, wall-clock times and the listener port change from run to run.
+  const masked = [".clock", "time", ".deadline-bar", ".grant-row .text-muted", "#listener"];
+  // A mask covers only the element box, and anti-aliased glyph edges can spill past it.
+  // The page's CSP blocks <style> elements, but not a constructed sheet.
+  await page.evaluate((selectors) => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(`${selectors} { color: transparent !important; }`);
+    document.adoptedStyleSheets = [sheet];
+  }, masked.join(", "));
   await expect(page).toHaveScreenshot(`${name}.png`, {
     fullPage: true,
-    // Countdowns, wall-clock times and the listener port change from run to run.
-    mask: [".clock", "time", ".deadline-bar", ".grant-row .text-muted", "#listener"].map(
-      (selector) => page.locator(selector),
-    ),
-    stylePath: join(import.meta.dirname, "screenshots.css"),
+    mask: masked.map((selector) => page.locator(selector)),
   });
 }
 
