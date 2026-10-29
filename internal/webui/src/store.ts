@@ -65,6 +65,8 @@ export const state = {
   live: "",
   helpOpen: false,
   detailsOpen: false,
+  // The deny note form stands in for the action row.
+  noteOpen: false,
   shortcutsOn: true,
   now: Date.now(),
 };
@@ -98,6 +100,7 @@ function emit() {
   if (id !== shownID) {
     shownID = id;
     state.detailsOpen = false;
+    state.noteOpen = false;
     if (shown?.state === "pending") startArming();
   }
   for (const listener of listeners) listener();
@@ -278,7 +281,13 @@ function errorMessage(error: unknown): string {
 }
 
 // The caller pins the request ID when the user acts; it is never read back from the selection.
-export async function decide(id: string, decision: "granted" | "denied", scope: Scope = "once") {
+// nono shows the agent the reason of a denial, so a note there reaches the agent.
+export async function decide(
+  id: string,
+  decision: "granted" | "denied",
+  scope: Scope = "once",
+  note = "",
+) {
   const approval = state.pending.get(id);
   if (!approval || !canDecide(approval)) return;
   state.sending.add(id);
@@ -287,13 +296,14 @@ export async function decide(id: string, decision: "granted" | "denied", scope: 
     once: decision === "granted" ? "Approved once in browser" : "Denied in browser",
     session: "Approved for session in browser",
   };
+  const reason = note ? `${reasons[scope]}: ${note}` : reasons[scope];
   emit();
   try {
     const response = await fetch(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
       method: "POST",
       credentials: "omit",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ decision, scope, reason: reasons[scope] }),
+      body: JSON.stringify({ decision, scope, reason }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `decision returned HTTP ${response.status}`);
@@ -562,6 +572,18 @@ export function setHelpOpen(open: boolean) {
 export function setDetailsOpen(open: boolean) {
   if (open === state.detailsOpen) return;
   state.detailsOpen = open;
+  emit();
+}
+
+// The note field takes focus, so what's typed there reaches no shortcut.
+export function openNote() {
+  state.noteOpen = true;
+  emit();
+  document.getElementById("deny-note")?.focus();
+}
+
+export function closeNote() {
+  state.noteOpen = false;
   emit();
 }
 

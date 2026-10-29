@@ -204,7 +204,8 @@ function webhook(id: string, args: string[], fields: RequestFields) {
 
 // Selectors live here so markup changes touch one file.
 function dashboard(page: Page) {
-  const deny = page.getByRole("button", { name: "Deny" });
+  // Ends with Deny, so "Deny with note" stays out.
+  const deny = page.getByRole("button", { name: /Deny$/ });
   const selected = (id: string) =>
     page.locator(`.queue-item[aria-pressed="true"][data-request-id="${id}"]`);
 
@@ -220,6 +221,8 @@ function dashboard(page: Page) {
     approve: page.getByRole("button", { name: "Approve once" }),
     approveSession: page.getByRole("button", { name: "Approve for session" }),
     deny,
+    denyWithNote: page.getByRole("button", { name: /Deny with note$/ }),
+    note: page.getByRole("textbox", { name: "Note for the agent" }),
     toast: page.locator("#toast"),
     offline: page.locator("#offline-banner"),
     filter: page.getByRole("searchbox"),
