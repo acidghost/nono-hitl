@@ -1,0 +1,88 @@
+/* Top bar: brand, view links, connection and help in one row. */
+@layer components {
+  .topbar {
+    flex-wrap: wrap;
+    min-height: var(--space-lg);
+    padding-block: var(--space-sm);
+    margin-bottom: var(--space-md);
+    border-bottom: var(--stroke-strong) solid var(--ink);
+  }
+
+  .brand {
+    font-size: var(--text-body);
+    font-weight: var(--weight-bold);
+    letter-spacing: var(--tracking-heading);
+    white-space: nowrap;
+
+    & img {
+      width: calc(var(--space-lg) * 0.75);
+      height: calc(var(--space-lg) * 0.75);
+      flex: none;
+    }
+  }
+
+  .status {
+    flex-wrap: wrap;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  .badge {
+    display: inline-block;
+    min-width: calc(var(--space-md) * 1.25);
+    padding-inline: var(--space-xs);
+    background: var(--ink);
+    color: var(--paper);
+    font-weight: var(--weight-bold);
+    text-align: center;
+  }
+
+  .dot {
+    width: var(--space-sm);
+    height: var(--space-sm);
+    border-radius: 50%;
+    flex: none;
+    background: var(--ink);
+  }
+
+  .connection {
+    &[data-state="offline"] .dot {
+      background: var(--danger);
+    }
+
+    &[data-state="connecting"] .dot {
+      background: var(--warning);
+    }
+  }
+
+  .help-button {
+    width: var(--control-size);
+    border: var(--stroke-thin) solid var(--rule);
+    background: transparent;
+    color: var(--text);
+    font-weight: var(--weight-bold);
+  }
+
+  /* View links read as tabs of the top bar; the current one sits on paper. */
+  .views {
+    --row-gap: var(--space-xs);
+  }
+
+  .view-link {
+    min-height: var(--control-size);
+    padding-inline: var(--space-sm);
+    border: var(--stroke-thin) solid transparent;
+    font-weight: var(--weight-medium);
+    text-decoration: none;
+    white-space: nowrap;
+
+    &:hover {
+      background: var(--wash);
+    }
+
+    &[aria-current="page"] {
+      background: var(--paper);
+      border-color: var(--ink);
+    }
+  }
+}

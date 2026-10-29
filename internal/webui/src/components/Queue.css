@@ -1,0 +1,62 @@
+/* Filing tabs sit directly on the card, each with its own draining deadline bar. */
+@layer components {
+  .queue-items {
+    display: flex;
+    gap: var(--space-xs);
+    overflow-x: auto;
+  }
+
+  .queue-command {
+    overflow: hidden;
+    font-family: var(--mono);
+    font-weight: var(--weight-bold);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .queue-meta {
+    grid-column: 1 / -1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .queue-item {
+    position: relative;
+    flex: 0 1 15rem;
+    min-width: 11rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0 var(--space-sm);
+    align-items: baseline;
+    padding: var(--space-sm);
+    text-align: left;
+    background: var(--queue-bg);
+    border: var(--stroke-thin) solid var(--rule);
+    border-bottom: 0;
+
+    &[aria-pressed="true"] {
+      background: var(--selected-bg);
+      color: var(--selected-ink);
+      border-color: var(--ink);
+    }
+
+    &[aria-pressed="true"] .queue-meta {
+      color: var(--selected-meta);
+    }
+
+    &:focus-visible {
+      outline-offset: calc(-1 * var(--space-xs));
+    }
+
+    &[aria-pressed="true"]:focus-visible {
+      outline-color: var(--selected-ink);
+    }
+
+    & .deadline-bar {
+      position: absolute;
+      inset: 0 0 auto;
+      background: none;
+    }
+  }
+}

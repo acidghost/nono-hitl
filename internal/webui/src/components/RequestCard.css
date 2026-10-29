@@ -1,0 +1,149 @@
+/* Request card: session line, argv, exceptions, decision, then details. */
+@layer components {
+  .sheet {
+    --sheet-inset: var(--space-md);
+    background: var(--paper);
+    border: var(--stroke-thin) solid var(--ink);
+    box-shadow: var(--raised-shadow);
+
+    &:not([data-state="pending"]) .deadline-bar {
+      visibility: hidden;
+    }
+  }
+
+  .sheet-body {
+    padding: var(--space-sm) var(--sheet-inset) 0;
+
+    &:focus-visible {
+      outline-offset: calc(-1 * var(--space-xs));
+    }
+  }
+
+  .who {
+    --row-gap: var(--space-sm);
+    flex-wrap: wrap;
+    align-items: baseline;
+
+    & strong {
+      color: var(--text);
+    }
+
+    & .clock {
+      margin-left: auto;
+      color: var(--text);
+    }
+  }
+
+  .sheet.urgent .who .clock {
+    color: var(--warning);
+  }
+
+  .argv-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    padding-block: var(--space-sm) var(--space-md);
+    font-family: var(--mono);
+  }
+
+  .chip {
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--wash);
+    border: var(--stroke-thin) solid var(--sheet-rule);
+    white-space: pre-wrap;
+  }
+
+  .chip-command {
+    font-weight: var(--weight-bold);
+    border-color: var(--ink);
+  }
+
+  .chip-toggle {
+    min-height: 0;
+    padding: var(--space-xs) var(--space-sm);
+    background: transparent;
+    border: var(--stroke-thin) dashed var(--rule);
+    color: var(--muted);
+    font-family: var(--sans);
+  }
+
+  .exception {
+    display: grid;
+    gap: var(--space-xs);
+    margin-bottom: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--warning-bg);
+    border-left: var(--stroke-strong) solid var(--warning);
+  }
+
+  .exception-reason {
+    font-weight: var(--weight-bold);
+  }
+
+  /* Details drawer: everything the card leaves out. */
+  .technical {
+    padding-inline: var(--sheet-inset);
+    border-top: var(--stroke-thin) solid var(--sheet-rule);
+
+    &[open] {
+      padding-bottom: var(--sheet-inset);
+    }
+
+    & summary {
+      cursor: pointer;
+      list-style: none;
+      width: 100%;
+      color: var(--muted);
+    }
+
+    & summary::-webkit-details-marker {
+      display: none;
+    }
+
+    & summary::before {
+      content: "+";
+      width: var(--space-md);
+      color: var(--ink);
+      font-weight: var(--weight-bold);
+      flex: none;
+    }
+
+    &[open] > summary::before {
+      content: "−";
+    }
+  }
+
+  .tech-grid {
+    display: grid;
+    gap: var(--space-sm);
+    margin: 0 0 var(--space-md);
+
+    & > div {
+      display: grid;
+      grid-template-columns: var(--label-width) minmax(0, 1fr);
+      gap: var(--space-md);
+    }
+
+    & dd {
+      margin: 0;
+    }
+  }
+
+  .argv-table {
+    border-collapse: collapse;
+    font-size: var(--text-small);
+
+    & th,
+    & td {
+      text-align: left;
+      vertical-align: top;
+      padding: 0 var(--space-md) var(--space-xs) 0;
+    }
+
+    & th {
+      font-weight: var(--weight-normal);
+      white-space: nowrap;
+    }
+  }
+}

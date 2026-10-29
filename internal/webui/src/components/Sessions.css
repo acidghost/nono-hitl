@@ -1,0 +1,41 @@
+/* Session approvals, one group per nono session. */
+@layer components {
+  .session-group {
+    margin-bottom: var(--space-md);
+    background: var(--paper);
+    border: var(--stroke-thin) solid var(--rule);
+  }
+
+  .session-head {
+    flex-wrap: wrap;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--wash);
+
+    & button {
+      margin-left: auto;
+    }
+  }
+
+  .session-title {
+    min-width: 0;
+  }
+
+  .session-name {
+    font-size: var(--text-body);
+  }
+
+  .grant-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  /* Single column: the argv takes its own line. */
+  @media (max-width: 40rem) {
+    .grant-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+
+      & code {
+        grid-column: 1 / -1;
+      }
+    }
+  }
+}

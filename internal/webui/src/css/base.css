@@ -1,0 +1,106 @@
+@layer base {
+  /* Base elements share typography, square controls and visible keyboard focus. */
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--desk);
+    color: var(--text);
+    font: var(--weight-normal) var(--text-body) / var(--leading-body) var(--sans);
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button,
+  a,
+  summary {
+    touch-action: manipulation;
+  }
+
+  button,
+  select,
+  summary {
+    min-height: var(--control-size);
+  }
+
+  button,
+  select {
+    border-radius: 0;
+  }
+
+  button {
+    cursor: pointer;
+    color: inherit;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  button:disabled,
+  select:disabled {
+    cursor: not-allowed;
+    opacity: var(--disabled-opacity);
+  }
+
+  :focus-visible {
+    outline: var(--stroke-strong) solid var(--focus);
+    outline-offset: var(--space-xs);
+  }
+
+  [hidden] {
+    /* biome-ignore lint/complexity/noImportantStyles: Hidden states must override layout display rules. */
+    display: none !important;
+  }
+
+  h1,
+  h2,
+  h3,
+  p {
+    margin: 0;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-size: var(--text-heading);
+    font-weight: var(--weight-bold);
+    line-height: var(--leading-heading);
+    letter-spacing: var(--tracking-heading);
+  }
+
+  h1 {
+    font-size: var(--text-display);
+  }
+
+  strong {
+    font-weight: var(--weight-bold);
+  }
+
+  code,
+  pre {
+    font-family: var(--mono);
+  }
+
+  code {
+    font-size: inherit;
+    overflow-wrap: anywhere;
+  }
+
+  kbd {
+    display: inline-block;
+    min-width: 1.5em;
+    padding-inline: var(--space-xs);
+    border: var(--stroke-thin) solid currentColor;
+    font: var(--weight-normal) var(--text-small) / var(--leading-body) var(--mono);
+    text-align: center;
+    opacity: 0.75;
+  }
+}

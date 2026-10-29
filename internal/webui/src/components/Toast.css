@@ -1,0 +1,14 @@
+@layer components {
+  .toast {
+    position: fixed;
+    right: var(--space-md);
+    bottom: var(--space-md);
+    max-width: min(32rem, calc(100% - var(--space-lg)));
+    padding: var(--space-sm) var(--space-md);
+    background: var(--paper);
+    border: var(--stroke-strong) solid var(--ink);
+    border-left: calc(var(--stroke-strong) * 3) solid var(--outcome-color, var(--ink));
+    box-shadow: var(--raised-shadow);
+    overflow-wrap: anywhere;
+  }
+}

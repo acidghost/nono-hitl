@@ -32,7 +32,12 @@ type Hitl = {
   // Posts a webhook and returns once the server knows the request, without waiting for the decision.
   submit(args: string[], fields?: RequestFields): Promise<Submitted>;
   pendingIDs(): Promise<string[]>;
-  decide(id: string, decision: Decision["decision"], reason: string): Promise<void>;
+  decide(
+    id: string,
+    decision: Decision["decision"],
+    reason: string,
+    scope?: "once" | "session",
+  ): Promise<void>;
   addSession(id: string, record: SessionRecord): Promise<void>;
 };
 
@@ -143,10 +148,10 @@ export const test = base.extend<{
         return requestIDs((await snapshot()).pending);
       },
 
-      async decide(id, decision, reason) {
+      async decide(id, decision, reason, scope = "once") {
         const response = await request.post(`/api/v1/approvals/${id}/decision`, {
           headers: { Origin: server.url },
-          data: { decision, reason },
+          data: { decision, reason, scope },
         });
         expect(response.ok()).toBe(true);
       },

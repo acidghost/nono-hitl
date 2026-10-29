@@ -1,0 +1,64 @@
+@layer utilities {
+  /* Utilities: nested rows reset their gap; components only override when needed. */
+  .row {
+    --row-gap: var(--space-md);
+    display: flex;
+    align-items: center;
+    gap: var(--row-gap);
+  }
+
+  .gap-small {
+    --row-gap: var(--space-sm);
+  }
+
+  .spread {
+    justify-content: space-between;
+  }
+
+  .text-small {
+    font-size: var(--text-small);
+  }
+
+  .text-body {
+    font-size: var(--text-body);
+  }
+
+  .text-heading {
+    font-size: var(--text-heading);
+  }
+
+  .text-display {
+    font-size: var(--text-display);
+  }
+
+  .text-heading,
+  .text-display {
+    line-height: var(--leading-heading);
+    letter-spacing: var(--tracking-heading);
+  }
+
+  .text-muted {
+    color: var(--muted);
+  }
+
+  .break-anywhere {
+    overflow-wrap: anywhere;
+  }
+
+  .pre-wrap {
+    white-space: pre-wrap;
+  }
+
+  /* Accessibility geometry is deliberately outside the visual spacing scale. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}

@@ -1,0 +1,132 @@
+/* Decisions and their form imprints. */
+@layer components {
+  .decision-area {
+    border-top: var(--stroke-thin) dashed var(--rule);
+    padding: var(--space-sm) var(--sheet-inset);
+  }
+
+  .decision-feedback {
+    color: var(--danger);
+
+    &:not(:empty) {
+      margin-bottom: var(--space-sm);
+    }
+  }
+
+  .action-row {
+    --row-gap: var(--space-sm) var(--space-md);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .scope {
+    flex: 1 1 12rem;
+  }
+
+  .actions {
+    & button {
+      position: relative;
+      overflow: hidden;
+      padding: 0 var(--space-md);
+      font-weight: var(--weight-bold);
+      border: var(--stroke-strong) solid var(--rule);
+      background: var(--paper);
+    }
+
+    & kbd {
+      margin-right: var(--space-sm);
+    }
+
+    & .button-deny {
+      color: var(--danger);
+      border-color: var(--danger-rule);
+    }
+
+    & .approve {
+      background: var(--approval-bg);
+      border-color: var(--approval-bg);
+      color: var(--approval-text);
+      justify-content: center;
+      box-shadow: var(--raised-shadow);
+    }
+
+    & button:hover:not(:disabled) {
+      outline: var(--stroke-strong) solid var(--rule);
+      outline-offset: var(--stroke-thin);
+    }
+
+    & .approve:active:not(:disabled) {
+      box-shadow: none;
+      transform: translate(var(--space-xs), var(--space-xs));
+    }
+
+    & button:disabled {
+      box-shadow: none;
+    }
+  }
+
+  /* Approve buttons fill up while arming; Decision.tsx sets --arm-ms from armMilliseconds. */
+  .arming .armed {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .arm-fill {
+    position: absolute;
+    inset: auto 0 0;
+    height: var(--space-xs);
+    transform-origin: left;
+  }
+
+  .arming .arm-fill {
+    background: currentColor;
+    animation: arm var(--arm-ms) linear forwards;
+  }
+
+  @keyframes arm {
+    from {
+      transform: scaleX(0);
+    }
+
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  .actions .pressing {
+    outline: var(--stroke-strong) solid var(--stack);
+    outline-offset: var(--stroke-strong);
+  }
+
+  .terminal p {
+    margin-top: var(--space-xs);
+  }
+
+  .stamp {
+    color: var(--outcome-color, var(--approved));
+    font-weight: var(--weight-bold);
+    flex: none;
+    border: var(--stroke-strong) solid currentColor;
+    padding: var(--space-xs) var(--space-sm);
+    position: relative;
+
+    &::before {
+      content: "";
+      position: absolute;
+      inset: calc(var(--space-xs) / 2);
+      border: var(--stroke-thin) solid currentColor;
+      pointer-events: none;
+    }
+  }
+
+  /* Single column: the decision buttons share the full width. */
+  @media (max-width: 40rem) {
+    .actions {
+      width: 100%;
+
+      & button {
+        flex: 1;
+      }
+    }
+  }
+}

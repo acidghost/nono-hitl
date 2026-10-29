@@ -1,0 +1,2 @@
+/* Later layers win whatever the selector specificity, so components override utilities. */
+@layer tokens, base, utilities, components;
