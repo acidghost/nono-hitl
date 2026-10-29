@@ -1,0 +1,8 @@
+/* A mask covers only the element box, and anti-aliased glyph edges can spill past it. */
+.clock,
+time,
+.grant-row .text-muted,
+#listener {
+  /* biome-ignore lint/complexity/noImportantStyles: The page sets these colors with more specific rules. */
+  color: transparent !important;
+}

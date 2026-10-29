@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 
@@ -14,6 +15,7 @@ async function shoot(page: Page, name: string) {
     mask: [".clock", "time", ".deadline-bar", ".grant-row .text-muted", "#listener"].map(
       (selector) => page.locator(selector),
     ),
+    stylePath: join(import.meta.dirname, "screenshots.css"),
   });
 }
 
