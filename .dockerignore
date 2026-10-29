@@ -5,6 +5,9 @@
 .github
 
 build
+**/node_modules
+internal/webui/e2e
+internal/webui/test-results
 *.out
 *.test
 coverage.*

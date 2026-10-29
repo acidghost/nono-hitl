@@ -18,6 +18,7 @@ install_prefix := `go env GOBIN`
 
 goos := if os() == 'macos' { 'darwin' } else { os() }
 goarch := if arch() == 'aarch64' { 'arm64' } else if arch() == 'x86_64' { 'amd64' } else { arch() }
+host_binary := justfile_directory() / 'build' / program + '-' + goos + '-' + goarch
 
 alias b := build
 alias r := run
@@ -60,6 +61,22 @@ test *args:
 
 vet:
     go vet ./...
+
+web-install:
+    cd {{webui_dir}} && bun install --frozen-lockfile
+
+typecheck: web-install
+    cd {{webui_dir}} && bunx tsc --noEmit
+
+_browser: web-install
+    cd {{webui_dir}} && ./node_modules/.bin/playwright install chromium
+
+e2e *args: _browser build typecheck
+    cd {{webui_dir}} && NONO_HITL_BIN='{{host_binary}}' bunx playwright test --project e2e {{args}}
+
+# local screenshot diffs, never run in CI; --update-snapshots retakes the baselines
+screenshots *args: _browser build typecheck
+    cd {{webui_dir}} && NONO_HITL_BIN='{{host_binary}}' bunx playwright test --project light --project dark {{args}}
 
 check: lint vet test build
 

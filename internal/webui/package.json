@@ -1,0 +1,10 @@
+{
+  "name": "nono-hitl-webui",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  }
+}
