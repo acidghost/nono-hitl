@@ -58,6 +58,15 @@ test("several pending", async ({ page, hitl, ui }) => {
   await shoot(page, "several-pending");
 });
 
+test("deny note", async ({ page, hitl, ui }) => {
+  await ui.open();
+  const { id } = await hitl.submit(["gh", "api", "repos/o/r/pulls/42"], { sessionID: "otter" });
+  await ui.armed(id);
+  await page.keyboard.press("Shift+N");
+  await ui.note.fill("use gh pr view 42 instead");
+  await shoot(page, "deny-note");
+});
+
 test.describe("short deadline", () => {
   test.use({ decisionTimeout: "12s" });
 

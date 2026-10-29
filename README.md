@@ -158,6 +158,11 @@ Approval does not report whether the command executed successfully. Decisions
 are disabled while disconnected, until the request state is reconciled, and once
 the deadline has passed.
 
+**Deny with note** sends a note with the denial. nono puts the denial reason in
+the error the agent gets for the blocked command, so a note such as "use gh pr
+view instead" tells it what to do next. nono replaces control characters with
+spaces, so the note stays on one line.
+
 Everything can be done from the keyboard; press `?` for the shortcuts, the theme
 selector, and a switch that turns shortcuts off. Approve keys are guarded: they
 work only one second after a request is shown or the window gains focus, and

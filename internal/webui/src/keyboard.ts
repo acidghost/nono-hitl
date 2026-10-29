@@ -10,6 +10,7 @@ import {
   moveSelection,
   notice,
   openHistory,
+  openNote,
   queueApproval,
   quietMilliseconds,
   revoke,
@@ -78,9 +79,11 @@ function handleKey(key: string, shift: boolean, gap: number): boolean {
     setDetailsOpen(!state.detailsOpen);
     return true;
   }
-  if (shown.state !== "pending") return false;
+  // With the note open, its own Deny and Cancel are the only decisions on screen.
+  if (shown.state !== "pending" || state.noteOpen) return false;
   if (key === "n") {
-    void decide(state.selectedID, "denied");
+    if (!shift) void decide(state.selectedID, "denied");
+    else if (canDecide(shown)) openNote();
     return true;
   }
   if (key === "y") {

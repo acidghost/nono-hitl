@@ -61,6 +61,51 @@ test("n denies", async ({ page, hitl, ui }) => {
   expect(await decision).toEqual(deniedInBrowser);
 });
 
+test("shift+n denies with a note for the agent", async ({ page, hitl, ui }) => {
+  await ui.open();
+  const { id, decision } = await hitl.submit(["gh", "api", "repos/o/r/pulls/42"]);
+  await ui.armed(id);
+  await page.keyboard.press("Shift+N");
+  await expect(ui.note).toBeFocused();
+  // Slower than the quiet window, so only the focus check keeps y and n out of the shortcuts.
+  await ui.note.pressSequentially("try y; gh pr view 42 n", { delay: 400 });
+  expect(await hitl.pendingIDs()).toEqual([id]);
+  await page.keyboard.press("Enter");
+  expect(await decision).toEqual({
+    decision: "denied",
+    reason: "Denied in browser: try y; gh pr view 42 n",
+  });
+});
+
+test("escape drops the note and keeps the request", async ({ page, hitl, ui }) => {
+  await ui.open();
+  const { id, decision } = await hitl.submit(["gh", "pr", "merge"]);
+  await ui.shown(id);
+  await ui.denyWithNote.click();
+  await ui.note.fill("not yet");
+  await page.keyboard.press("Escape");
+  await expect(ui.note).toBeHidden();
+  expect(await hitl.pendingIDs()).toEqual([id]);
+  await page.keyboard.press("n");
+  expect(await decision).toEqual(deniedInBrowser);
+});
+
+test("approve keys do nothing while the note is open", async ({ page, hitl, ui }) => {
+  await ui.open();
+  const { id, decision } = await hitl.submit(["gh", "pr", "merge"]);
+  await ui.armed(id);
+  await page.keyboard.press("Shift+N");
+  // Focus leaves the note field, so the keys reach the shortcut handler.
+  await page.locator("#review").focus();
+  await page.waitForTimeout(400);
+  await page.keyboard.press("y");
+  await page.waitForTimeout(400);
+  expect(await hitl.pendingIDs()).toEqual([id]);
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.keyboard.press("n");
+  expect(await decision).toEqual(deniedInBrowser);
+});
+
 test("a clicked decision leaves nothing focused that acts on the next request", async ({
   page,
   hitl,

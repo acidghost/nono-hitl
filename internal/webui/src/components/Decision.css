@@ -23,6 +23,17 @@
     flex: 1 1 12rem;
   }
 
+  /* The note input takes the room the scope line had. */
+  .note-form input {
+    flex: 1 1 12rem;
+    min-height: var(--control-size);
+    padding-inline: var(--space-sm);
+    background: var(--paper);
+    color: var(--text);
+    border: var(--stroke-thin) solid var(--rule);
+    border-radius: 0;
+  }
+
   .actions {
     & button {
       position: relative;

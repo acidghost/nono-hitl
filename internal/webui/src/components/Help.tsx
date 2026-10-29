@@ -37,6 +37,10 @@ export function Help() {
           Approving lets nono run the command in the child sandbox set by the profile. It adds no
           permissions.
         </li>
+        <li>
+          A deny note reaches the agent in nono's error for the blocked command, so it can say what
+          to run instead.
+        </li>
         <li>Decisions are kept in memory and cleared when the service restarts.</li>
         <li>
           Approve keys work one second after a request appears, and only after a pause in typing, so
@@ -59,6 +63,7 @@ export function Help() {
         <Keys keys={["y"]}>Approve once</Keys>
         <Keys keys={["⇧Y"]}>Approve for session</Keys>
         <Keys keys={["n"]}>Deny</Keys>
+        <Keys keys={["⇧N"]}>Deny with a note for the agent</Keys>
         <Keys keys={["i"]}>Details</Keys>
         <Keys keys={["p", "s", "h"]}>Pending, Sessions, History</Keys>
         <Keys keys={["/"]}>Filter sessions or history</Keys>
