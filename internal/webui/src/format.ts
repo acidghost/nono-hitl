@@ -146,3 +146,14 @@ export function riskComparison(advice: Advice): string {
   const relation = advice.risk <= advice.max_risk ? "≤" : ">";
   return `${advice.risk.toFixed(3)} ${relation} ${Number(advice.max_risk).toFixed(3)}`;
 }
+
+// The server refuses prefix tokens holding spaces, so splitting on them never changes a saved
+// entry.
+export function prefixTokens(text: string): string[] {
+  return text.split(/\s+/).filter(Boolean);
+}
+
+// The server counts classifiers from zero, the form from one.
+export function configError(message: string): string {
+  return message.replace(/classifiers\[(\d+)\]/, (_, index) => `Classifier ${Number(index) + 1}`);
+}

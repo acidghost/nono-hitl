@@ -3,8 +3,10 @@
 import {
   commandRequest,
   commandTitle,
+  configError,
   displayArgs,
   grantID,
+  prefixTokens,
   requestID,
   safeInline,
   sessionLabel,
@@ -13,14 +15,22 @@ import {
   timestamp,
 } from "./format";
 import { notify } from "./notifications";
-import type { Approval, ApprovalState, Resolution, SessionGrant, Snapshot } from "./types";
+import type {
+  Approval,
+  ApprovalState,
+  Classifier,
+  ConfigFile,
+  Resolution,
+  SessionGrant,
+  Snapshot,
+} from "./types";
 
 // Approve keys and buttons wait this long after the shown request changes or the window
 // gains focus, and approve keys need this much quiet before and after the keypress.
 export const armMilliseconds = 1000;
 export const quietMilliseconds = 300;
 
-export const views = ["pending", "sessions", "history"] as const;
+export const views = ["pending", "sessions", "history", "classifiers"] as const;
 export type View = (typeof views)[number];
 export type Connection = "connecting" | "online" | "offline";
 export type Scope = "once" | "session";
@@ -36,6 +46,18 @@ export type SessionGroup = {
 
 // Sessions and History are flat row lists for j, k, x and Enter, whatever their grouping.
 export type Row = { id: string; grant?: SessionGrant; approval?: Approval };
+
+// A classifier as the form edits it: the prefix as one line, max_risk as typed.
+export type DraftClassifier = {
+  key: number;
+  prefix: string;
+  ask: string;
+  model: string;
+  maxRisk: string;
+  mode: string;
+};
+
+export type DraftField = Exclude<keyof DraftClassifier, "key">;
 
 const shortcutsKey = "nono-hitl-shortcuts";
 
@@ -68,6 +90,14 @@ export const state = {
   // The deny note form stands in for the action row.
   noteOpen: false,
   shortcutsOn: true,
+  // The Classifiers view edits a copy of the config's entries until Save sends them all.
+  classifiers: {
+    ollamaURL: "",
+    draft: undefined as DraftClassifier[] | undefined,
+    changed: false,
+    saving: false,
+    error: "",
+  },
   now: Date.now(),
 };
 
@@ -80,6 +110,7 @@ let armedAt = 0;
 let armTimer: ReturnType<typeof setTimeout> | undefined;
 let queueTimer: ReturnType<typeof setTimeout> | undefined;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+let draftKey = 0;
 
 export function subscribe(listener: () => void): () => void {
   listeners.add(listener);
@@ -363,6 +394,101 @@ export async function revoke(ids: string[]) {
     notice(`Could not revoke session approval: ${safeInline(errorMessage(error), 160)}`);
   } finally {
     void refreshSnapshot();
+  }
+}
+
+// Called when the view opens. Unsaved edits win over the file.
+export async function loadClassifiers() {
+  if (state.classifiers.changed) return;
+  try {
+    const response = await fetch("/api/v1/config", {
+      credentials: "omit",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`config returned HTTP ${response.status}`);
+    const file = await response.json();
+    if (!state.classifiers.changed) applyConfig(file);
+  } catch (error) {
+    state.classifiers.error = `Could not load classifiers: ${safeInline(errorMessage(error), 160)}`;
+    emit();
+  }
+}
+
+function applyConfig(file: Partial<ConfigFile>) {
+  const entries = Array.isArray(file?.classifiers) ? file.classifiers : [];
+  state.classifiers.ollamaURL = String(file?.ollama_url ?? "");
+  state.classifiers.draft = entries.map(toDraft);
+  state.classifiers.changed = false;
+  state.classifiers.error = "";
+  emit();
+}
+
+function toDraft(entry: Classifier): DraftClassifier {
+  return {
+    key: ++draftKey,
+    prefix: Array.isArray(entry.prefix) ? entry.prefix.join(" ") : "",
+    ask: String(entry.ask ?? ""),
+    model: String(entry.model ?? ""),
+    maxRisk: String(entry.max_risk ?? ""),
+    mode: String(entry.mode ?? ""),
+  };
+}
+
+function fromDraft(draft: DraftClassifier): Classifier {
+  return {
+    prefix: prefixTokens(draft.prefix),
+    ask: draft.ask.trim(),
+    model: draft.model.trim(),
+    max_risk: Number(draft.maxRisk),
+    mode: draft.mode,
+  };
+}
+
+export function addClassifier() {
+  const entry = { prefix: [], ask: "", model: "d3", max_risk: 0.3, mode: "advise" };
+  state.classifiers.draft?.push(toDraft(entry));
+  changeDraft();
+}
+
+export function editClassifier(key: number, field: DraftField, value: string) {
+  const entry = state.classifiers.draft?.find((draft) => draft.key === key);
+  if (entry) entry[field] = value;
+  changeDraft();
+}
+
+export function removeClassifier(key: number) {
+  state.classifiers.draft = state.classifiers.draft?.filter((draft) => draft.key !== key);
+  changeDraft();
+}
+
+function changeDraft() {
+  state.classifiers.changed = true;
+  emit();
+}
+
+// The server checks the whole list, writes the config file, and only then uses it.
+export async function saveClassifiers() {
+  const { draft, saving } = state.classifiers;
+  if (!draft || saving) return;
+  state.classifiers.saving = true;
+  state.classifiers.error = "";
+  emit();
+  try {
+    const response = await fetch("/api/v1/config", {
+      method: "PUT",
+      credentials: "omit",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ classifiers: draft.map(fromDraft) }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `saving returned HTTP ${response.status}`);
+    applyConfig(payload);
+    notice("Classifiers saved.");
+  } catch (error) {
+    state.classifiers.error = configError(safeInline(errorMessage(error), 300));
+  } finally {
+    state.classifiers.saving = false;
+    emit();
   }
 }
 

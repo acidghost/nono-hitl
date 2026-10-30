@@ -1,0 +1,222 @@
+/* Classifiers: one sheet per entry, headed by the argv its prefix matches, then a bar with Save. */
+@layer components {
+  .classifiers-intro {
+    max-width: var(--measure-long);
+    margin-bottom: var(--space-md);
+  }
+
+  .classifier {
+    min-inline-size: 0;
+    margin: 0 0 var(--space-md);
+    padding: 0;
+    background: var(--paper);
+    border: var(--stroke-thin) solid var(--rule);
+  }
+
+  /* RequestCard.css comes later in the bundle, so chip overrides need the extra class. */
+  .classifier-head {
+    padding: var(--space-sm) var(--space-md);
+    background: var(--wash);
+    border-bottom: var(--stroke-thin) solid var(--sheet-rule);
+
+    & .chip {
+      background: var(--paper);
+    }
+
+    /* Any further arguments. */
+    & .chip-rest {
+      color: var(--muted);
+      border: var(--stroke-thin) dashed var(--rule);
+    }
+  }
+
+  .classifier-chips {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs);
+    min-width: 0;
+    font-family: var(--mono);
+  }
+
+  .classifier-body {
+    display: grid;
+    grid-template-columns: var(--label-width) minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-sm) var(--space-md);
+    padding: var(--space-md);
+
+    /* Labels sit level with the first line of their field. */
+    & > label {
+      display: flex;
+      align-items: center;
+      min-height: var(--control-size);
+    }
+
+    & input:not([type="range"]),
+    & textarea,
+    & select {
+      min-height: var(--control-size);
+      padding-inline: var(--space-sm);
+      background: var(--paper);
+      color: var(--text);
+      border: var(--stroke-thin) solid var(--rule);
+      border-radius: 0;
+    }
+
+    & textarea {
+      padding-block: var(--space-xs);
+      resize: vertical;
+    }
+  }
+
+  .classifier-prefix {
+    font-family: var(--mono);
+  }
+
+  .classifier-ask {
+    display: grid;
+    gap: var(--space-xs);
+  }
+
+  .classifier-model {
+    width: var(--measure-short);
+  }
+
+  .risk-value {
+    min-width: 5ch;
+    font-weight: var(--weight-bold);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The track splits where max_risk is, in the advice badge's colors, and the thumb is a notch
+   * on the split. Each engine needs its own rules: one unknown pseudo-element drops a rule. */
+  .risk-slider {
+    flex: 1;
+    min-width: 0;
+    height: var(--control-size);
+    margin: 0;
+    background: transparent;
+    appearance: none;
+    cursor: pointer;
+
+    &::-webkit-slider-runnable-track {
+      height: var(--space-sm);
+      background: linear-gradient(
+        to right,
+        var(--approved) calc(var(--max-risk) * 100%),
+        var(--danger-rule) 0
+      );
+      box-shadow: inset 0 0 0 var(--stroke-thin) var(--rule);
+    }
+
+    &::-moz-range-track {
+      height: var(--space-sm);
+      background: linear-gradient(
+        to right,
+        var(--approved) calc(var(--max-risk) * 100%),
+        var(--danger-rule) 0
+      );
+      box-shadow: inset 0 0 0 var(--stroke-thin) var(--rule);
+    }
+
+    &::-webkit-slider-thumb {
+      box-sizing: border-box;
+      width: var(--space-sm);
+      height: calc(var(--space-lg) * 0.75);
+      margin-top: calc((var(--space-sm) - var(--space-lg) * 0.75) / 2);
+      background: var(--paper);
+      border: var(--stroke-strong) solid var(--ink);
+      border-radius: 0;
+      appearance: none;
+    }
+
+    &::-moz-range-thumb {
+      box-sizing: border-box;
+      width: var(--space-sm);
+      height: calc(var(--space-lg) * 0.75);
+      background: var(--paper);
+      border: var(--stroke-strong) solid var(--ink);
+      border-radius: 0;
+    }
+  }
+
+  .risk-safe {
+    color: var(--approved);
+    font-weight: var(--weight-medium);
+  }
+
+  .risk-risky {
+    color: var(--danger);
+    font-weight: var(--weight-medium);
+  }
+
+  /* An empty slot where the next entry goes. */
+  .add-classifier {
+    width: 100%;
+    margin-bottom: var(--space-md);
+    background: transparent;
+    border: var(--stroke-thin) dashed var(--rule);
+    font-weight: var(--weight-medium);
+
+    &:hover {
+      background: var(--wash);
+    }
+  }
+
+  /* Stays in reach at the bottom of a long list. */
+  .classifiers-bar {
+    position: sticky;
+    bottom: 0;
+    flex-wrap: wrap;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--paper);
+    border: var(--stroke-thin) solid var(--ink);
+    box-shadow: var(--raised-shadow);
+  }
+
+  .classifiers-note {
+    flex: 1 1 16rem;
+    min-width: 0;
+  }
+
+  .classifiers-error {
+    color: var(--danger);
+  }
+
+  .save-button {
+    margin-left: auto;
+    padding: 0 var(--space-lg);
+    font-weight: var(--weight-bold);
+    background: var(--approval-bg);
+    color: var(--approval-text);
+    border: var(--stroke-strong) solid var(--approval-bg);
+  }
+
+  /* Single column: labels sit above their fields. */
+  @media (max-width: 40rem) {
+    .classifier-body {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-xs);
+
+      & > label {
+        min-height: 0;
+        margin-top: var(--space-sm);
+      }
+    }
+
+    .risk-row {
+      flex-wrap: wrap;
+    }
+
+    .risk-slider {
+      order: -1;
+      flex-basis: 100%;
+    }
+
+    .risk-risky {
+      margin-left: auto;
+    }
+  }
+}

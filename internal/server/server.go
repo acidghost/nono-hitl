@@ -27,7 +27,8 @@ const (
 )
 
 // Config controls the bounded local HTTP service. File is the content of the
-// config file. ClassifierTimeout bounds each decision model call.
+// config file at ConfigPath, where the dashboard saves its changes.
+// ClassifierTimeout bounds each decision model call.
 type Config struct {
 	ListenAddress        string
 	DecisionTimeout      time.Duration
@@ -35,6 +36,7 @@ type Config struct {
 	MaxDecisionBodyBytes int64
 	MaxSSEClients        int
 	File                 config.File
+	ConfigPath           string
 	ClassifierTimeout    time.Duration
 }
 
@@ -62,6 +64,11 @@ type Server struct {
 	sseSlots      chan struct{}
 	listening     chan struct{}
 	listeningOnce sync.Once
+
+	// file is the config in use. It starts as Config.File and changes when the
+	// dashboard saves.
+	fileMu sync.Mutex
+	file   config.File
 }
 
 // New validates configuration and builds an HTTP service.
@@ -105,6 +112,7 @@ func New(config Config, store *approval.Store) (*Server, error) {
 		origin:    "http://" + host,
 		sseSlots:  make(chan struct{}, config.MaxSSEClients),
 		listening: make(chan struct{}),
+		file:      config.File,
 	}
 	server.handler = server.routes()
 	return server, nil

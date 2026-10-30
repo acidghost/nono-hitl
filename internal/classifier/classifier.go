@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -36,8 +37,12 @@ func (e Entry) Validate() error {
 	if len(e.Prefix) == 0 || len(e.Prefix) > maxPrefixTokens {
 		return fmt.Errorf("prefix must contain 1 to %d tokens", maxPrefixTokens)
 	}
-	if slices.Contains(e.Prefix, "") {
-		return errors.New("prefix tokens must not be empty")
+	// The dashboard splits prefixes on spaces, so a token holding one would
+	// come back from it as two.
+	if slices.ContainsFunc(e.Prefix, func(token string) bool {
+		return token == "" || strings.ContainsFunc(token, unicode.IsSpace)
+	}) {
+		return errors.New("prefix tokens must not be empty or contain spaces")
 	}
 	if strings.TrimSpace(e.Ask) == "" || len(e.Ask) > maxAskBytes {
 		return fmt.Errorf("ask must contain 1 to %d bytes", maxAskBytes)

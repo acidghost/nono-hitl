@@ -148,11 +148,13 @@ service.
 
 The config file is `$XDG_CONFIG_HOME/nono-hitl/config.json` when that variable
 holds an absolute path, `~/.config/nono-hitl/config.json` otherwise. The service
-reads it at startup, so restart it after an edit. A missing file leaves every
-setting at its default, which means no classifiers. An invalid one, unknown
-fields included, stops the service from starting.
-[`config.json`](examples/config.json) is a starting point, and the
-[command classifier](#command-classifier) section explains its fields.
+reads it at startup, so restart it after a hand edit. A missing file leaves
+every setting at its default, which means no classifiers. An invalid one,
+unknown fields included, stops the service from starting. Saving from the
+[Classifiers view](#command-classifier) rewrites the file, dropping hand edits
+made since the service started. [`config.json`](examples/config.json) is a
+starting point, and the [command classifier](#command-classifier) section
+explains its fields.
 
 Stopping the process with `SIGINT` or `SIGTERM` denies all pending requests and
 shuts the HTTP server down gracefully.
@@ -162,13 +164,14 @@ shuts the HTTP server down gracefully.
 Open <http://127.0.0.1:8765/>. Do not substitute `localhost`: exact `Host` and
 same-origin checks are intentional.
 
-The dashboard has three views. **Pending** shows waiting requests as tabs above
+The dashboard has four views. **Pending** shows waiting requests as tabs above
 the request card, with the decision buttons right below the arguments.
 **Sessions** lists session approvals grouped by nono session, and **History**
 lists recent decisions; select one to open its card with the final outcome.
-Approval does not report whether the command executed successfully. Decisions
-are disabled while disconnected, until the request state is reconciled, and once
-the deadline has passed.
+**Classifiers** edits the [command classifiers](#command-classifier). Approval
+does not report whether the command executed successfully. Decisions are
+disabled while disconnected, until the request state is reconciled, and once the
+deadline has passed.
 
 **Deny with note** sends a note with the denial. nono puts the denial reason in
 the error the agent gets for the blocked command, so a note such as "use gh pr
@@ -253,7 +256,7 @@ Classifiers live in the [config file](#command-line-usage), next to the
 - `prefix` matches whole tokens. The first one matches the command name nono
   reports, the others the arguments after the program, so `docker` doesn't match
   `dockerd`. The longest matching prefix wins: `docker run` gets the second ask
-  and `docker ps` the first.
+  and `docker ps` the first. Tokens can't contain spaces.
 - The model answers the `ask` with the probability that it is true. Phrase it so
   true means risky. The request looks safe when the answer is at most
   `max_risk`.
@@ -267,6 +270,13 @@ The card shows **Classifying…** until the model answers, then **Looks safe** o
 longer than 15 seconds shows **Unavailable** and the reason, which also goes to
 stderr. Advice arriving re-arms the approve buttons. Requests released by a
 session approval skip the model, and History keeps the advice of the others.
+
+The **Classifiers** view edits the same list. Changes stay in the browser until
+**Save** sends the whole list. The service checks it as it checks the file at
+startup, writes the file with mode 0600 through a temporary file and a rename,
+and only then uses the new entries. A request already waiting keeps the advice
+it got. The view shows `ollama_url` but can't change it: only a hand edit of the
+file changes where arguments go.
 
 To try an ask, give the model the JSON `nono-hitl` sends:
 
@@ -319,16 +329,17 @@ connection.
 
 The unauthenticated decision API is protected by sandbox reachability, not by a
 login or bearer token. A process that can connect to the service can submit
-decisions. A process that can bind the port while the trusted service is absent
-can impersonate it. Before use, verify that neither the agent session nor its
-delegated children can connect to the service or bind its port; inspect the
-effective composed profile, not just the example overlay.
+decisions and replace the classifiers. A process that can bind the port while
+the trusted service is absent can impersonate it. Before use, verify that
+neither the agent session nor its delegated children can connect to the service
+or bind its port; inspect the effective composed profile, not just the example
+overlay.
 
 Browser-origin controls provide defense in depth against cross-origin web pages:
-decision requests require the exact loopback `Origin`, JSON content type, and
-exact `Host`; the service emits no CORS permission headers and all GET routes
-are side-effect free. These controls do not make a localhost-reachable hostile
-process safe.
+decision and config requests require the exact loopback `Origin`, JSON content
+type, and exact `Host`; the service emits no CORS permission headers and all GET
+routes are side-effect free. These controls do not make a localhost-reachable
+hostile process safe.
 
 Approval releases only the profile's static child sandbox. Request arguments are
 displayed as untrusted text, never shell-parsed or executed by `nono-hitl`, and
@@ -361,7 +372,8 @@ advice as a hint, never as a reason to skip reading the request.
   answer never decides a request;
 - malformed, oversized, duplicate, late, canceled, unsupported, timed-out, and
   shutdown requests do not grant execution;
-- no approval or application state is written to disk.
+- no approval state is written to disk. The one file the service writes is the
+  config file, when the Classifiers view saves.
 
 ### Out of scope
 
@@ -431,8 +443,9 @@ to the child.
 
 ### A browser decision returns 403
 
-Decisions require the exact `Origin: http://127.0.0.1:8765` and JSON content
-type. Use the embedded dashboard rather than weakening origin or CORS checks.
+Decisions and config saves require the exact `Origin: http://127.0.0.1:8765` and
+JSON content type. Use the embedded dashboard rather than weakening origin or
+CORS checks.
 
 ### Running in Docker
 

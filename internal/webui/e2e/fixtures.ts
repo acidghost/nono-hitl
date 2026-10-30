@@ -281,6 +281,11 @@ function dashboard(page: Page) {
     queue: page.locator(".queue-item"),
     grants: page.locator(".grant-row"),
     history: page.locator(".history-row"),
+    classifier: (number: number) =>
+      page.getByRole("group", { name: `Classifier ${number}`, exact: true }),
+    addClassifier: page.getByRole("button", { name: "Add classifier" }),
+    saveClassifiers: page.getByRole("button", { name: "Save" }),
+    classifiersStatus: page.locator("#classifiers-status"),
 
     async open() {
       await page.goto("/");

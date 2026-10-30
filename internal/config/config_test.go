@@ -81,6 +81,7 @@ func TestLoadRejectsInvalidConfigs(t *testing.T) {
 			want:    "prefix must contain",
 		},
 		{name: "empty token", content: entry(`["docker"]`, `["docker",""]`), want: "must not be empty"},
+		{name: "token with a space", content: entry(`["docker"]`, `["docker","run "]`), want: "contain spaces"},
 		{name: "blank ask", content: entry(`"Is this docker command risky?"`, `" "`), want: "ask must contain"},
 		{
 			name:    "long ask",
@@ -111,6 +112,78 @@ func TestLoadRejectsInvalidConfigs(t *testing.T) {
 				t.Fatalf("Load() error = %v, want one containing %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestSaveWritesWhatLoadReads(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "nono-hitl")
+	path := filepath.Join(dir, "config.json")
+	want := File{
+		OllamaURL: DefaultOllamaURL,
+		Classifiers: []classifier.Entry{{
+			Prefix:  []string{"docker", "run"},
+			Ask:     "Does it mount <host> paths & more?",
+			Model:   "d3",
+			MaxRisk: 0.2,
+			Mode:    classifier.ModeAdvise,
+		}},
+	}
+	if err := Save(path, want); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Load() = %+v, want %+v", got, want)
+	}
+
+	data, err := os.ReadFile(path) //nolint:gosec // a file the test wrote
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "<host> paths & more") {
+		t.Errorf("file = %s, want the ask unescaped", data)
+	}
+	assertMode(t, dir, 0o700)
+	assertMode(t, path, 0o600)
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("directory holds %d files, want only the config", len(entries))
+	}
+}
+
+func TestSaveKeepsASymlinkedConfig(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	target := writeConfig(t, `{"classifiers":[]}`)
+	link := filepath.Join(dir, "config.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	file := File{OllamaURL: "http://127.0.0.1:9999", Classifiers: []classifier.Entry{}}
+	if err := Save(link, file); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("Lstat(link) = %v, %v, want a symlink", info, err)
+	}
+	if got, err := Load(target); err != nil || !reflect.DeepEqual(got, file) {
+		t.Fatalf("Load(target) = %+v, %v, want %+v", got, err, file)
+	}
+}
+
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Errorf("mode of %s = %v, want %v", path, got, want)
 	}
 }
 

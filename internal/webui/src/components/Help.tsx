@@ -65,7 +65,7 @@ export function Help() {
         <Keys keys={["n"]}>Deny</Keys>
         <Keys keys={["⇧N"]}>Deny with a note for the agent</Keys>
         <Keys keys={["i"]}>Details</Keys>
-        <Keys keys={["p", "s", "h"]}>Pending, Sessions, History</Keys>
+        <Keys keys={["p", "s", "h", "c"]}>Pending, Sessions, History, Classifiers</Keys>
         <Keys keys={["/"]}>Filter sessions or history</Keys>
         <Keys keys={["x"]}>Revoke a session approval</Keys>
         <Keys keys={["⇧X"]}>Revoke a whole session</Keys>

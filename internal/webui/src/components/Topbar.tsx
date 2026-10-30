@@ -13,6 +13,7 @@ export function Topbar() {
         <ViewLink view="pending" label="Pending" hint="p" count={state.pending.size} />
         <ViewLink view="sessions" label="Sessions" hint="s" count={state.grants.length} />
         <ViewLink view="history" label="History" hint="h" />
+        <ViewLink view="classifiers" label="Classifiers" hint="c" />
       </nav>
       <div class="status row text-small text-muted">
         <p

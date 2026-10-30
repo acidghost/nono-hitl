@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -438,6 +439,7 @@ func newTestServer(t *testing.T, mutate func(*Config)) (*Server, *approval.Store
 	t.Helper()
 	store := newApprovalStore(t)
 	config := DefaultConfig()
+	config.ConfigPath = filepath.Join(t.TempDir(), "nono-hitl", "config.json")
 	if mutate != nil {
 		mutate(&config)
 	}

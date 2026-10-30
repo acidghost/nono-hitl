@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   clip,
   commandTitle,
+  configError,
   countdown,
   displayArg,
   displayArgs,
   duration,
+  prefixTokens,
   riskComparison,
   rulePath,
   safeInline,
@@ -146,4 +148,16 @@ describe("verdict", () => {
     expect(riskComparison(advice)).toBe("");
     expect(verdict({ ...advice, error: "connection refused" })).toBe("unavailable");
   });
+});
+
+test("prefixes split on any run of whitespace", () => {
+  expect(prefixTokens("  docker\trun \n --privileged ")).toEqual(["docker", "run", "--privileged"]);
+  expect(prefixTokens("   ")).toEqual([]);
+});
+
+test("config errors number classifiers like the form", () => {
+  expect(configError("classifiers[0]: model is required")).toBe("Classifier 1: model is required");
+  expect(configError("at most 64 classifiers are allowed")).toBe(
+    "at most 64 classifiers are allowed",
+  );
 });

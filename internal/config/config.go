@@ -69,6 +69,49 @@ func Load(path string) (File, error) {
 	return file, nil
 }
 
+// Save writes a temporary file next to the config and renames it over the
+// config, so a crash leaves the old file or the new one, never half of each.
+// A symlinked config keeps its link and gets a new target. The file is 0600
+// and a missing directory is created 0700.
+func Save(path string, file File) error {
+	if path == "" {
+		return errors.New("the config file has no path")
+	}
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		path = target
+	}
+	var data bytes.Buffer
+	encoder := json.NewEncoder(&data)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(file); err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+
+	temp, err := os.CreateTemp(dir, ".config-*.json")
+	if err != nil {
+		return err
+	}
+	_, err = temp.Write(data.Bytes())
+	if err == nil {
+		err = temp.Sync()
+	}
+	if closeErr := temp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(temp.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(temp.Name())
+	}
+	return err
+}
+
 // Validate checks the URL, every classifier, and that no two classifiers
 // share a prefix.
 func (f File) Validate() error {
