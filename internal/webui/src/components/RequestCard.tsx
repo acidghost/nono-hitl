@@ -10,19 +10,22 @@ import {
   displayArgs,
   duration,
   requestID,
+  riskComparison,
   rulePath,
   safeInline,
   sessionLabel,
   sessionWhere,
   shortTime,
   stateLabel,
+  verdict,
+  verdictLabels,
 } from "../format";
 import { setDetailsOpen, state } from "../store";
-import type { Approval, CommandRequest, SessionRecord } from "../types";
+import type { Advice, Approval, CommandRequest, SessionRecord } from "../types";
 import { Decision } from "./Decision";
 
-// The card for one request: session line, argv, exceptions, decision, then details. App keys
-// it by request ID, so nothing a user expanded carries over to the next request.
+// The card for one request: session line, argv, exceptions, advice, decision, then details.
+// App keys it by request ID, so nothing a user expanded carries over to the next request.
 export function RequestCard({ approval }: { approval: Approval }) {
   const request = commandRequest(approval);
   const args = Array.isArray(request.args) ? request.args : [];
@@ -64,6 +67,7 @@ export function RequestCard({ approval }: { approval: Approval }) {
           ))}
         </div>
         <Exception request={request} />
+        {approval.advice && <AdviceRow advice={approval.advice} />}
       </div>
       <Decision approval={approval} sessionLabel={label} />
       <details
@@ -153,6 +157,26 @@ function Exception({ request }: { request: Partial<CommandRequest> }) {
           Matched <code>{rulePath(request)}</code>
         </p>
       )}
+    </div>
+  );
+}
+
+// What the decision model said about the request. It informs the human and decides nothing.
+function AdviceRow({ advice }: { advice: Advice }) {
+  const shown = verdict(advice);
+  const score = riskComparison(advice);
+  return (
+    <div class="advice" id="advice" data-verdict={shown}>
+      <p class="row gap-small" role="status">
+        <span class="advice-badge text-small">{verdictLabels[shown]}</span>
+        {score && <code class="text-small">{score}</code>}
+        {advice.error && (
+          <span class="text-small break-anywhere">{safeInline(advice.error, 200)}</span>
+        )}
+      </p>
+      <p class="text-small text-muted break-anywhere">
+        Asked <code>{safeInline(advice.model, 60)}</code>: {safeInline(advice.ask, 300)}
+      </p>
     </div>
   );
 }

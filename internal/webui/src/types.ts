@@ -35,6 +35,17 @@ export type Resolution = {
   resolved_at: string;
 };
 
+// A decision model's answer to a classifier's ask. risk and error are both unset while it
+// answers.
+export type Advice = {
+  model: string;
+  ask: string;
+  max_risk: number;
+  mode: string;
+  risk?: number;
+  error?: string;
+};
+
 export type Approval = {
   envelope: WebhookEnvelope;
   session?: SessionRecord;
@@ -42,6 +53,7 @@ export type Approval = {
   created_at: string;
   deadline: string;
   resolution?: Resolution;
+  advice?: Advice;
 };
 
 export type SessionGrant = {

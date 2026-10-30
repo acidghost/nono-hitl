@@ -1,5 +1,5 @@
 // Pure text helpers. Every value from a request is untrusted and only ever rendered as text.
-import type { Approval, CommandRequest, SessionGrant, SessionRecord } from "./types";
+import type { Advice, Approval, CommandRequest, SessionGrant, SessionRecord } from "./types";
 
 export const clipLength = 120;
 
@@ -122,4 +122,27 @@ export function grantUsage(grant: SessionGrant): string {
   if (uses === 0) return "unused";
   const times = uses === 1 ? "once" : `${uses} times`;
   return `used ${times}, last ${shortTime(grant.last_used_at)}`;
+}
+
+export type Verdict = "classifying" | "safe" | "risky" | "unavailable";
+
+export const verdictLabels: Record<Verdict, string> = {
+  classifying: "Classifying…",
+  safe: "Looks safe",
+  risky: "Looks risky",
+  unavailable: "Unavailable",
+};
+
+// A request passes when the model gives the ask a risk of at most max_risk.
+export function verdict(advice: Advice): Verdict {
+  if (advice.error) return "unavailable";
+  if (typeof advice.risk !== "number") return "classifying";
+  return advice.risk <= advice.max_risk ? "safe" : "risky";
+}
+
+// The relation compares exact values, so a risk of 0.3004 reads 0.300 > 0.300.
+export function riskComparison(advice: Advice): string {
+  if (typeof advice.risk !== "number") return "";
+  const relation = advice.risk <= advice.max_risk ? "≤" : ">";
+  return `${advice.risk.toFixed(3)} ${relation} ${Number(advice.max_risk).toFixed(3)}`;
 }

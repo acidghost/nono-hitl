@@ -1,0 +1,24 @@
+{
+  "ollama_url": "http://127.0.0.1:11434",
+  "classifiers": [
+    {
+      "prefix": [
+        "docker"
+      ],
+      "ask": "Is this docker command dangerous or risky?",
+      "model": "d3",
+      "max_risk": 0.3,
+      "mode": "advise"
+    },
+    {
+      "prefix": [
+        "docker",
+        "run"
+      ],
+      "ask": "Does this docker run command mount host paths, use host namespaces or run privileged?",
+      "model": "d3",
+      "max_risk": 0.2,
+      "mode": "advise"
+    }
+  ]
+}

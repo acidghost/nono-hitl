@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/acidghost/nono-hitl/internal/approval"
+	"github.com/acidghost/nono-hitl/internal/classifier"
+	"github.com/acidghost/nono-hitl/internal/config"
 )
 
 const (
@@ -21,15 +23,19 @@ const (
 	defaultDecisionBodyBytes = 4 * 1024
 	defaultMaxSSEClients     = 16
 	defaultSSEBuffer         = 32
+	defaultClassifierTimeout = 15 * time.Second
 )
 
-// Config controls the bounded local HTTP service.
+// Config controls the bounded local HTTP service. File is the content of the
+// config file. ClassifierTimeout bounds each decision model call.
 type Config struct {
 	ListenAddress        string
 	DecisionTimeout      time.Duration
 	MaxWebhookBodyBytes  int64
 	MaxDecisionBodyBytes int64
 	MaxSSEClients        int
+	File                 config.File
+	ClassifierTimeout    time.Duration
 }
 
 // DefaultConfig returns secure MVP defaults.
@@ -40,6 +46,8 @@ func DefaultConfig() Config {
 		MaxWebhookBodyBytes:  defaultWebhookBodyBytes,
 		MaxDecisionBodyBytes: defaultDecisionBodyBytes,
 		MaxSSEClients:        defaultMaxSSEClients,
+		File:                 config.File{OllamaURL: config.DefaultOllamaURL},
+		ClassifierTimeout:    defaultClassifierTimeout,
 	}
 }
 
@@ -47,6 +55,7 @@ func DefaultConfig() Config {
 type Server struct {
 	config        Config
 	store         *approval.Store
+	ollama        *classifier.Client
 	host          string
 	origin        string
 	handler       http.Handler
@@ -77,10 +86,21 @@ func New(config Config, store *approval.Store) (*Server, error) {
 	if config.MaxSSEClients <= 0 {
 		return nil, errors.New("maximum SSE clients must be positive")
 	}
+	if config.ClassifierTimeout <= 0 {
+		return nil, errors.New("classifier timeout must be positive")
+	}
+	if err := config.File.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config file: %w", err)
+	}
+	ollama, err := classifier.NewClient(config.File.OllamaURL, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	server := &Server{
 		config:    config,
 		store:     store,
+		ollama:    ollama,
 		host:      host,
 		origin:    "http://" + host,
 		sseSlots:  make(chan struct{}, config.MaxSSEClients),
@@ -161,6 +181,12 @@ func applyDefaults(config *Config) {
 	}
 	if config.MaxSSEClients == 0 {
 		config.MaxSSEClients = defaults.MaxSSEClients
+	}
+	if config.File.OllamaURL == "" {
+		config.File.OllamaURL = defaults.File.OllamaURL
+	}
+	if config.ClassifierTimeout == 0 {
+		config.ClassifierTimeout = defaults.ClassifierTimeout
 	}
 }
 

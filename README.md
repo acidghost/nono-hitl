@@ -130,6 +130,10 @@ Server options:
 -nono-state-dir string
       nono state directory holding the session records
       (default "$XDG_STATE_HOME/nono" or "~/.local/state/nono")
+-config string
+      config file
+      (default "$XDG_CONFIG_HOME/nono-hitl/config.json" or
+      "~/.config/nono-hitl/config.json")
 ```
 
 The listen address must use literal `127.0.0.1`; `localhost`, IPv6 loopback,
@@ -141,6 +145,14 @@ The state directory follows nono's own rule: `$XDG_STATE_HOME/nono` when that
 variable holds an absolute path, `~/.local/state/nono` otherwise. Set
 `-nono-state-dir` only if nono runs with a different `XDG_STATE_HOME` than the
 service.
+
+The config file is `$XDG_CONFIG_HOME/nono-hitl/config.json` when that variable
+holds an absolute path, `~/.config/nono-hitl/config.json` otherwise. The service
+reads it at startup, so restart it after an edit. A missing file leaves every
+setting at its default, which means no classifiers. An invalid one, unknown
+fields included, stops the service from starting.
+[`config.json`](examples/config.json) is a starting point, and the
+[command classifier](#command-classifier) section explains its fields.
 
 Stopping the process with `SIGINT` or `SIGTERM` denies all pending requests and
 shuts the HTTP server down gracefully.
@@ -205,6 +217,64 @@ snapshot, so reconnecting does not create a second approval or lose the
 authoritative state. Recently resolved requests are bounded in memory and
 disappear when the service restarts.
 
+### Command classifier
+
+A classifier attaches a question, the ask, to every request whose arguments
+start with a given prefix. While the request waits, `nono-hitl` sends the
+command and its arguments to a local [Ollama](https://ollama.com) decision model
+and shows the answer on the request card. The model decides nothing: the request
+waits for a human either way.
+
+Classifiers live in the [config file](#command-line-usage), next to the
+`ollama_url` they call:
+
+```json
+{
+  "ollama_url": "http://127.0.0.1:11434",
+  "classifiers": [
+    {
+      "prefix": ["docker"],
+      "ask": "Is this docker command dangerous or risky?",
+      "model": "d3",
+      "max_risk": 0.3,
+      "mode": "advise"
+    },
+    {
+      "prefix": ["docker", "run"],
+      "ask": "Does this docker run command mount host paths, use host namespaces or run privileged?",
+      "model": "d3",
+      "max_risk": 0.2,
+      "mode": "advise"
+    }
+  ]
+}
+```
+
+- `prefix` matches whole tokens. The first one matches the command name nono
+  reports, the others the arguments after the program, so `docker` doesn't match
+  `dockerd`. The longest matching prefix wins: `docker run` gets the second ask
+  and `docker ps` the first.
+- The model answers the `ask` with the probability that it is true. Phrase it so
+  true means risky. The request looks safe when the answer is at most
+  `max_risk`.
+- `model` must be a decision model, one Ollama serves on `/v1/systemone`.
+- `mode` is required. `advise` is the only mode for now.
+- `ollama_url` is optional and defaults to `http://127.0.0.1:11434`. The command
+  and arguments of every matching request go there.
+
+The card shows **Classifying…** until the model answers, then **Looks safe** or
+**Looks risky** with the answer against `max_risk`. A call that fails or takes
+longer than 15 seconds shows **Unavailable** and the reason, which also goes to
+stderr. Advice arriving re-arms the approve buttons. Requests released by a
+session approval skip the model, and History keeps the advice of the others.
+
+To try an ask, give the model the JSON `nono-hitl` sends:
+
+```sh
+echo '{"command":"docker","args":["docker","run","-v","/:/host","alpine"]}' |
+  ollama run d3 --ask "Is this docker command dangerous or risky?"
+```
+
 ## Profile wiring
 
 `nono-hitl` does not restrict the program named by a command request; nono's
@@ -235,7 +305,8 @@ connection.
 - the host user launching `nono-hitl`;
 - the nono supervisor and its pre-authored profiles;
 - the browser displaying the dashboard;
-- host-side credential capture commands.
+- host-side credential capture commands;
+- the config file, the Ollama instance at `ollama_url`, and its models.
 
 ### Untrusted components
 
@@ -271,6 +342,14 @@ directories from a record are display labels: session approvals match on the
 session ID in the request. A record can only remove approvals, by saying its
 session exited.
 
+Classifier advice is only as good as Ollama and the config file. Anything that
+can reach Ollama's port can replace or delete the model behind a name, so the
+agent and its delegated children must not reach `127.0.0.1:11434` or write to
+`~/.ollama`. They must not be able to write the config file either: with it, the
+agent could raise `max_risk` or remove an entry. Command arguments are untrusted
+input to the model, and text in them can lower the risk it reports. Read the
+advice as a hint, never as a reason to skip reading the request.
+
 ### Bounded, fail-closed behavior
 
 - at most 32 requests may be pending;
@@ -278,6 +357,8 @@ session exited.
 - at most 64 session approvals are kept; the oldest is evicted first;
 - request bodies, fields, arguments, decision bodies, SSE clients, and
   subscriber buffers are bounded;
+- each classifier call is bounded at 15 seconds and a 64 KiB response, and its
+  answer never decides a request;
 - malformed, oversized, duplicate, late, canceled, unsupported, timed-out, and
   shutdown requests do not grant execution;
 - no approval or application state is written to disk.
@@ -319,6 +400,13 @@ trusted supervisor remains able to reach it.
 A missing dashboard or notification does not stop the timer. Open the dashboard
 and decide within 55 seconds. Keep nono's webhook timeout longer than the
 service timeout so the service can return an explicit denial first.
+
+### The card says Unavailable
+
+The reason comes from the call to Ollama. Check that Ollama runs at
+`ollama_url`, that `ollama list` shows the model, and that the same ask works
+with `ollama run MODEL --ask`. Ollama refuses models that aren't decision
+models. The first call after Ollama unloads a model can take several seconds.
 
 ### Notifications do not appear
 
@@ -401,6 +489,9 @@ just screenshots
 `just screenshots` compares light and dark screenshots of the main dashboard
 states with local baselines that stay out of git. Take them on a known-good
 commit with `just screenshots --update-snapshots`.
+
+To try the dashboard by hand, run `just run serve -config examples/config.json`
+and send requests with [`send-request.sh`](examples/send-request.sh).
 
 ## License
 

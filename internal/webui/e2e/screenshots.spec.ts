@@ -69,6 +69,17 @@ test("several pending", async ({ page, hitl, ui }) => {
   await shoot(page, "several-pending");
 });
 
+test("advice", async ({ page, hitl, ui }) => {
+  await ui.open();
+  const { id } = await hitl.submit(["docker", "run", "--rm", "-v", "/:/host", "alpine"], {
+    sessionID: "otter",
+  });
+  // Advice landing re-arms the card, so wait for it first.
+  await expect(ui.advice).toContainText("Looks risky");
+  await ui.armed(id);
+  await shoot(page, "advice");
+});
+
 test("deny note", async ({ page, hitl, ui }) => {
   await ui.open();
   const { id } = await hitl.submit(["gh", "api", "repos/o/r/pulls/42"], { sessionID: "otter" });

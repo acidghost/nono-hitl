@@ -6,14 +6,16 @@ import {
   displayArg,
   displayArgs,
   duration,
+  riskComparison,
   rulePath,
   safeInline,
   sessionLabel,
   sessionWhere,
   stateLabel,
   truncate,
+  verdict,
 } from "./format";
-import type { Approval } from "./types";
+import type { Advice, Approval } from "./types";
 
 describe("safeInline", () => {
   test("control characters become spaces", () => {
@@ -126,4 +128,22 @@ test("sessions read from the record when there is one", () => {
   expect(sessionLabel("", undefined)).toBe("unknown session");
   expect(sessionWhere(record)).toBe("claude in /src");
   expect(sessionWhere(undefined)).toBe("");
+});
+
+describe("verdict", () => {
+  const advice: Advice = { model: "d3", ask: "Is this risky?", max_risk: 0.3, mode: "advise" };
+
+  test("passes at or below max_risk", () => {
+    expect(verdict({ ...advice, risk: 0.3 })).toBe("safe");
+    expect(verdict({ ...advice, risk: 0.3001 })).toBe("risky");
+    expect(riskComparison({ ...advice, risk: 0.3 })).toBe("0.300 ≤ 0.300");
+    expect(riskComparison({ ...advice, risk: 0.3004 })).toBe("0.300 > 0.300");
+    expect(riskComparison({ ...advice, risk: 0.91 })).toBe("0.910 > 0.300");
+  });
+
+  test("waits for an answer and reports failures", () => {
+    expect(verdict(advice)).toBe("classifying");
+    expect(riskComparison(advice)).toBe("");
+    expect(verdict({ ...advice, error: "connection refused" })).toBe("unavailable");
+  });
 });

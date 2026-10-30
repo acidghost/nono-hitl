@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { access, constants, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -51,6 +53,8 @@ declare global {
 
 const basePort = 18765;
 
+export const dockerAsk = "Is this docker command dangerous or risky?";
+
 export const test = base.extend<{
   decisionTimeout: string;
   server: Server;
@@ -66,6 +70,17 @@ export const test = base.extend<{
       throw new Error(`NONO_HITL_BIN=${binary} is not an executable; run the suite with just e2e`);
     });
     const stateDir = await mkdtemp(join(tmpdir(), "nono-hitl-e2e-"));
+    const ollama = await fakeOllama();
+    const config = join(stateDir, "config.json");
+    await writeFile(
+      config,
+      JSON.stringify({
+        ollama_url: ollama.url,
+        classifiers: [
+          { prefix: ["docker"], ask: dockerAsk, model: "d3", max_risk: 0.3, mode: "advise" },
+        ],
+      }),
+    );
     // A server per test keeps queues, history and grants apart. Tests running at the same
     // time have distinct parallel indexes.
     const address = `127.0.0.1:${basePort + testInfo.parallelIndex}`;
@@ -79,6 +94,8 @@ export const test = base.extend<{
         decisionTimeout,
         "--nono-state-dir",
         stateDir,
+        "--config",
+        config,
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
     );
@@ -102,12 +119,14 @@ export const test = base.extend<{
     }
     if (!ready) {
       child.kill();
+      await ollama.close();
       throw new Error(`nono-hitl did not start on ${address}:\n${output}`);
     }
 
     await use({ url, stateDir });
     child.kill("SIGTERM");
     await exited;
+    await ollama.close();
     await rm(stateDir, { recursive: true, force: true });
   },
 
@@ -185,6 +204,37 @@ export const test = base.extend<{
   ],
 });
 
+// Ollama's /v1/systemone, answering by the docker subcommand: ps looks safe, run looks risky,
+// pull fails, and build never answers.
+async function fakeOllama() {
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8").on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const subcommand = JSON.parse(body).state.args[1];
+      if (subcommand === "build") return;
+      response.setHeader("Content-Type", "application/json");
+      if (subcommand === "pull") {
+        response.writeHead(404).end(JSON.stringify({ error: "model 'd3' not found" }));
+        return;
+      }
+      const noul = subcommand === "run" ? 0.91 : 0.02;
+      response.end(JSON.stringify({ model: "d3", answers: { risk: { type: "noul", noul } } }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    async close() {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
 function webhook(id: string, args: string[], fields: RequestFields) {
   return {
     backend: "nono-hitl",
@@ -224,6 +274,7 @@ function dashboard(page: Page) {
     denyWithNote: page.getByRole("button", { name: /Deny with note$/ }),
     note: page.getByRole("textbox", { name: "Note for the agent" }),
     toast: page.locator("#toast"),
+    advice: page.locator("#advice"),
     offline: page.locator("#offline-banner"),
     filter: page.getByRole("searchbox"),
     help: page.getByRole("dialog", { name: "Help" }),

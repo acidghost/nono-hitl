@@ -13,6 +13,7 @@ import (
 
 	"github.com/acidghost/nono-hitl/internal/approval"
 	"github.com/acidghost/nono-hitl/internal/browser"
+	"github.com/acidghost/nono-hitl/internal/config"
 	"github.com/acidghost/nono-hitl/internal/server"
 	"github.com/acidghost/nono-hitl/internal/session"
 )
@@ -53,21 +54,22 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 func runServe(args []string, stdout, stderr io.Writer) error {
-	config := server.DefaultConfig()
+	serverConfig := server.DefaultConfig()
 	openDashboard := false
 	stateDir := session.DefaultStateDir()
+	configPath := config.DefaultPath()
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.StringVar(
-		&config.ListenAddress,
+		&serverConfig.ListenAddress,
 		"listen",
-		config.ListenAddress,
+		serverConfig.ListenAddress,
 		"literal IPv4 loopback address and port",
 	)
 	flags.DurationVar(
-		&config.DecisionTimeout,
+		&serverConfig.DecisionTimeout,
 		"decision-timeout",
-		config.DecisionTimeout,
+		serverConfig.DecisionTimeout,
 		"maximum time to wait for a decision",
 	)
 	flags.BoolVar(
@@ -81,6 +83,12 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		"nono-state-dir",
 		stateDir,
 		"nono state directory holding the session records",
+	)
+	flags.StringVar(
+		&configPath,
+		"config",
+		configPath,
+		"config file",
 	)
 	flags.Usage = func() {
 		_, _ = fmt.Fprintln(stderr, "Usage: nono-hitl serve [options]")
@@ -96,6 +104,11 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("serve does not accept positional arguments")
 	}
 
+	file, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	serverConfig.File = file
 	registry, err := session.NewRegistry(stateDir)
 	if err != nil {
 		return fmt.Errorf("configure session records: %w", err)
@@ -109,7 +122,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("create approval store: %w", err)
 	}
-	service, err := server.New(config, store)
+	service, err := server.New(serverConfig, store)
 	if err != nil {
 		return fmt.Errorf("configure server: %w", err)
 	}
