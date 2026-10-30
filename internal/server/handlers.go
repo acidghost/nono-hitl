@@ -15,10 +15,15 @@ import (
 
 	"github.com/acidghost/nono-hitl/internal/approval"
 	"github.com/acidghost/nono-hitl/internal/classifier"
+	"github.com/acidghost/nono-hitl/internal/config"
 	"github.com/acidghost/nono-hitl/internal/webui"
 )
 
-const maxDecisionReasonBytes = 4 * 1024
+const (
+	maxDecisionReasonBytes = 4 * 1024
+	// Fits the most classifiers the config allows, each with the longest ask.
+	maxConfigBodyBytes = 512 * 1024
+)
 
 type decisionRequest struct {
 	Decision string `json:"decision"`
@@ -29,6 +34,12 @@ type decisionRequest struct {
 type decisionResponse struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason,omitempty"`
+}
+
+// configRequest is the body of PUT /api/v1/config. ollama_url stays out, so
+// only a hand edit of the file changes where arguments go.
+type configRequest struct {
+	Classifiers []classifier.Entry `json:"classifiers"`
 }
 
 type snapshotResponse struct {
@@ -50,6 +61,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 	mux.HandleFunc("POST /api/v1/approvals/{id}/decision", s.handleDecision)
 	mux.HandleFunc("DELETE /api/v1/grants/{id}", s.handleRevoke)
+	mux.HandleFunc("GET /api/v1/config", s.handleConfig)
+	mux.HandleFunc("PUT /api/v1/config", s.handleConfigUpdate)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	return s.securityHeaders(s.validateHost(mux))
@@ -100,7 +113,7 @@ func (s *Server) handleWebhook(writer http.ResponseWriter, request *http.Request
 // the request waits.
 func (s *Server) submit(ctx context.Context, envelope approval.WebhookEnvelope) (approval.Resolution, error) {
 	request := envelope.Request
-	entry, matched := classifier.Match(s.config.File.Classifiers, request.Command, request.Args)
+	entry, matched := classifier.Match(s.currentFile().Classifiers, request.Command, request.Args)
 	if !matched {
 		return s.store.Submit(ctx, envelope, s.config.DecisionTimeout)
 	}
@@ -210,6 +223,71 @@ func (s *Server) handleRevoke(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleConfig(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, s.currentFile())
+}
+
+func (s *Server) handleConfigUpdate(writer http.ResponseWriter, request *http.Request) {
+	if request.Header.Get("Origin") != s.origin {
+		writeError(writer, http.StatusForbidden, "config changes require the local UI origin")
+		return
+	}
+	if !isJSON(request.Header.Get("Content-Type")) {
+		writeError(writer, http.StatusUnsupportedMediaType, "content type must be application/json")
+		return
+	}
+
+	body, tooLarge, err := readBounded(request.Body, maxConfigBodyBytes)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "could not read request body")
+		return
+	}
+	if tooLarge {
+		writeError(writer, http.StatusRequestEntityTooLarge, "request body is too large")
+		return
+	}
+
+	var requested configRequest
+	if err := decodeStrictJSON(body, &requested); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid config request")
+		return
+	}
+	// A missing list would delete every classifier.
+	if requested.Classifiers == nil {
+		writeError(writer, http.StatusBadRequest, "classifiers is required")
+		return
+	}
+	file := config.File{OllamaURL: s.currentFile().OllamaURL, Classifiers: requested.Classifiers}
+	if err := file.Validate(); err != nil {
+		writeError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.saveFile(file); err != nil {
+		log.Printf("save config %s: %v", s.config.ConfigPath, err)
+		writeError(writer, http.StatusInternalServerError, "could not save the config file")
+		return
+	}
+	writeJSON(writer, http.StatusOK, file)
+}
+
+func (s *Server) currentFile() config.File {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+	return s.file
+}
+
+// saveFile swaps the config in only once it is on disk, so the service never
+// runs entries a restart would drop. The lock keeps concurrent saves in order.
+func (s *Server) saveFile(file config.File) error {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+	if err := config.Save(s.config.ConfigPath, file); err != nil {
+		return err
+	}
+	s.file = file
+	return nil
 }
 
 func (s *Server) handleEvents(writer http.ResponseWriter, request *http.Request) {

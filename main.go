@@ -109,6 +109,7 @@ func runServe(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 	serverConfig.File = file
+	serverConfig.ConfigPath = configPath
 	registry, err := session.NewRegistry(stateDir)
 	if err != nil {
 		return fmt.Errorf("configure session records: %w", err)

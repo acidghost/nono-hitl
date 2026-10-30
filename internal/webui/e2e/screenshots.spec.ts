@@ -13,8 +13,15 @@ async function shoot(page: Page, name: string) {
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
-  // Countdowns, wall-clock times and the listener port change from run to run.
-  const masked = [".clock", "time", ".deadline-bar", ".grant-row .text-muted", "#listener"];
+  // Countdowns, wall-clock times and the listener and fake Ollama ports change from run to run.
+  const masked = [
+    ".clock",
+    "time",
+    ".deadline-bar",
+    ".grant-row .text-muted",
+    "#listener",
+    "#ollama-url",
+  ];
   // A mask covers only the element box, and anti-aliased glyph edges can spill past it.
   // The page's CSP blocks <style> elements, but not a constructed sheet.
   await page.evaluate((selectors) => {
@@ -151,6 +158,16 @@ test("offline", async ({ page, hitl, ui }) => {
   await expect(ui.queue).toHaveCount(1);
   await expect(page.locator(".actions.arming")).toHaveCount(0);
   await shoot(page, "offline");
+});
+
+test("config", async ({ page, ui }) => {
+  await ui.open();
+  await page.keyboard.press("c");
+  await ui.addClassifier.click();
+  await ui.classifier(2).getByLabel("Prefix").fill("docker run");
+  await ui.classifier(2).getByLabel("Ask").fill("Does this docker run command mount host paths?");
+  await expect(ui.configStatus).toHaveText("Unsaved changes");
+  await shoot(page, "config");
 });
 
 test("help", async ({ page, ui }) => {

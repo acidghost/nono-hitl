@@ -2,6 +2,7 @@ import "./App.css";
 import type { TargetedKeyboardEvent } from "preact";
 import { requestID, safeInline } from "../format";
 import { rows, setFilter, shownApproval, sortedPending, state } from "../store";
+import { Config } from "./Config";
 import { Help } from "./Help";
 import { BackButton, History } from "./History";
 import { Queue } from "./Queue";
@@ -12,7 +13,7 @@ import { Topbar } from "./Topbar";
 
 export function App() {
   const shown = shownApproval();
-  const lists = state.view !== "pending" && !state.openedID;
+  const lists = (state.view === "sessions" || state.view === "history") && !state.openedID;
   return (
     <>
       <a class="skip" href="#review">
@@ -30,6 +31,7 @@ export function App() {
           )}
           {state.view === "pending" && <Queue />}
           {lists && <ListView />}
+          {state.view === "config" && <Config />}
           {state.openedID && <BackButton />}
           {shown && <RequestCard key={requestID(shown)} approval={shown} />}
           {state.view === "pending" && sortedPending().length === 0 && <EmptySheet />}

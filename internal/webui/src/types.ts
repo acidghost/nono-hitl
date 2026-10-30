@@ -1,4 +1,5 @@
-// Payloads of the approval API, mirroring internal/approval and internal/session by hand.
+// Payloads of the approval and config APIs, mirroring internal/approval, internal/session,
+// internal/classifier and internal/config by hand.
 
 export type ApprovalState = "pending" | "granted" | "denied" | "expired" | "canceled";
 
@@ -73,4 +74,17 @@ export type Snapshot = {
   pending: Approval[];
   recent: Approval[];
   grants: SessionGrant[];
+};
+
+export type Classifier = {
+  prefix: string[];
+  ask: string;
+  model: string;
+  max_risk: number;
+  mode: string;
+};
+
+export type ConfigFile = {
+  ollama_url: string;
+  classifiers: Classifier[] | null;
 };
