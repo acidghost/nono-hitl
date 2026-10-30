@@ -1,4 +1,4 @@
-/* Request card: session line, argv, exceptions, decision, then details. */
+/* Request card: session line, argv, exceptions, advice, decision, then details. */
 @layer components {
   .sheet {
     --sheet-inset: var(--space-md);
@@ -79,6 +79,33 @@
 
   .exception-reason {
     font-weight: var(--weight-bold);
+  }
+
+  .advice {
+    --verdict: var(--muted);
+    display: grid;
+    gap: var(--space-xs);
+    margin-bottom: var(--space-md);
+
+    &[data-verdict="safe"] {
+      --verdict: var(--approved);
+    }
+
+    &[data-verdict="risky"] {
+      --verdict: var(--danger);
+    }
+
+    &[data-verdict="unavailable"] {
+      --verdict: var(--warning);
+    }
+  }
+
+  .advice-badge {
+    flex: none;
+    padding: 0 var(--space-xs);
+    color: var(--verdict);
+    font-weight: var(--weight-bold);
+    border: var(--stroke-thin) solid currentColor;
   }
 
   /* Details drawer: everything the card leaves out. */

@@ -67,6 +67,7 @@ const (
 	EventPending  EventKind = "pending"
 	EventResolved EventKind = "resolved"
 	EventGrants   EventKind = "grants"
+	EventAdvice   EventKind = "advice"
 )
 
 // Event is an immutable approval-store notification. Grants events carry the
@@ -79,7 +80,8 @@ type Event struct {
 }
 
 // Approval is an immutable snapshot suitable for an API or UI. Session is
-// nono's record of the requesting session when one could be read.
+// nono's record of the requesting session when one could be read. Advice is
+// set when a classifier entry matched the request.
 type Approval struct {
 	Envelope   WebhookEnvelope `json:"envelope"`
 	Session    *session.Record `json:"session,omitempty"`
@@ -87,6 +89,19 @@ type Approval struct {
 	CreatedAt  time.Time       `json:"created_at"`
 	Deadline   time.Time       `json:"deadline"`
 	Resolution *Resolution     `json:"resolution,omitempty"`
+	Advice     *Advice         `json:"advice,omitempty"`
+}
+
+// Advice is a decision model's answer to the ask of a classifier entry.
+// Risk is the probability the model gives the ask. Risk and Error are both
+// unset while the model is answering.
+type Advice struct {
+	Model   string   `json:"model"`
+	Ask     string   `json:"ask"`
+	MaxRisk float64  `json:"max_risk"`
+	Mode    string   `json:"mode"`
+	Risk    *float64 `json:"risk,omitempty"`
+	Error   string   `json:"error,omitempty"`
 }
 
 // StoreConfig bounds all retained in-memory state.
@@ -155,6 +170,20 @@ func (s *Store) Submit(
 	envelope WebhookEnvelope,
 	timeout time.Duration,
 ) (Resolution, error) {
+	return s.SubmitAdvised(ctx, envelope, timeout, nil, nil)
+}
+
+// SubmitAdvised is Submit for a request a decision model is asked about. The
+// approval starts with advice, and onPending runs once it is pending, so an
+// Advise call it starts always finds the approval. A request released by a
+// session approval never runs onPending.
+func (s *Store) SubmitAdvised(
+	ctx context.Context,
+	envelope WebhookEnvelope,
+	timeout time.Duration,
+	advice *Advice,
+	onPending func(),
+) (Resolution, error) {
 	if err := envelope.Request.Validate(); err != nil {
 		return Resolution{}, err
 	}
@@ -165,9 +194,12 @@ func (s *Store) Submit(
 		return Resolution{}, errors.New("approval timeout must be positive")
 	}
 
-	item, err := s.add(envelope, s.lookupSession(envelope.Request.SessionID), timeout)
+	item, queued, err := s.add(envelope, s.lookupSession(envelope.Request.SessionID), timeout, advice)
 	if err != nil {
 		return Resolution{}, err
+	}
+	if queued && onPending != nil {
+		onPending()
 	}
 
 	select {
@@ -241,6 +273,26 @@ func (s *Store) DecideForSession(requestID string, reason string) (Resolution, e
 	s.grants[key] = grant
 	s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
 	return resolution, nil
+}
+
+// Advise replaces the advice of a pending or recent approval.
+func (s *Store) Advise(requestID string, advice Advice) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if item, exists := s.pending[requestID]; exists {
+		item.approval.Advice = cloneAdvice(&advice)
+		s.publishLocked(Event{Kind: EventAdvice, Approval: item.approval})
+		return nil
+	}
+	for i := range s.recent {
+		if s.recent[i].Envelope.Request.RequestID == requestID {
+			s.recent[i].Advice = cloneAdvice(&advice)
+			s.publishLocked(Event{Kind: EventAdvice, Approval: s.recent[i]})
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrNotFound, requestID)
 }
 
 // Revoke removes the session grant with the given ID.
@@ -434,27 +486,30 @@ func (s *Store) lookupSession(sessionID string) *session.Record {
 	return record
 }
 
+// add reports queued when the approval waits for a decision, and not when a
+// session grant released it.
 func (s *Store) add(
 	envelope WebhookEnvelope,
 	record *session.Record,
 	timeout time.Duration,
-) (*entry, error) {
+	advice *Advice,
+) (item *entry, queued bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.closed {
-		return nil, ErrStoreClosed
+		return nil, false, ErrStoreClosed
 	}
 	requestID := envelope.Request.RequestID
 	if _, exists := s.pending[requestID]; exists {
-		return nil, fmt.Errorf("%w: %s", ErrDuplicate, requestID)
+		return nil, false, fmt.Errorf("%w: %s", ErrDuplicate, requestID)
 	}
 	if _, exists := s.recentByID[requestID]; exists {
-		return nil, fmt.Errorf("%w: %s", ErrDuplicate, requestID)
+		return nil, false, fmt.Errorf("%w: %s", ErrDuplicate, requestID)
 	}
 
 	now := time.Now()
-	item := &entry{
+	item = &entry{
 		approval: Approval{
 			Envelope:  cloneEnvelope(envelope),
 			Session:   cloneRecord(record),
@@ -471,18 +526,19 @@ func (s *Store) add(
 		grant.LastUsedAt = released.ResolvedAt
 		s.grants[key] = grant
 		s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
-		return item, nil
+		return item, false, nil
 	}
 
 	if len(s.pending) >= s.maxPending {
-		return nil, ErrStoreFull
+		return nil, false, ErrStoreFull
 	}
+	item.approval.Advice = cloneAdvice(advice)
 	s.pending[requestID] = item
 	s.publishLocked(Event{Kind: EventPending, Approval: item.approval})
 	item.timer = time.AfterFunc(timeout, func() {
 		_, _ = s.transition(requestID, StateExpired, "approval request timed out")
 	})
-	return item, nil
+	return item, true, nil
 }
 
 func (s *Store) transition(requestID string, state State, reason string) (Resolution, error) {
@@ -571,7 +627,20 @@ func cloneApproval(approval Approval) Approval {
 		resolution := *approval.Resolution
 		cloned.Resolution = &resolution
 	}
+	cloned.Advice = cloneAdvice(approval.Advice)
 	return cloned
+}
+
+func cloneAdvice(advice *Advice) *Advice {
+	if advice == nil {
+		return nil
+	}
+	cloned := *advice
+	if advice.Risk != nil {
+		risk := *advice.Risk
+		cloned.Risk = &risk
+	}
+	return &cloned
 }
 
 func cloneRecord(record *session.Record) *session.Record {

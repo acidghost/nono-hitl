@@ -267,6 +267,105 @@ func TestStorePublishesPendingAndResolvedEvents(t *testing.T) {
 	_ = awaitResult(t, result)
 }
 
+func TestStoreAdviseUpdatesPendingAndRecentApprovals(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 4)
+	events, unsubscribe := store.Subscribe(4)
+	defer unsubscribe()
+
+	advice := Advice{Model: "d3", Ask: "Is this risky?", MaxRisk: 0.3, Mode: "advise"}
+	pendingAtCallback := make(chan int, 1)
+	result := make(chan submitResult, 1)
+	go func() {
+		resolution, err := store.SubmitAdvised(
+			context.Background(),
+			testEnvelope("req-advice"),
+			time.Second,
+			&advice,
+			func() { pendingAtCallback <- len(store.Pending()) },
+		)
+		result <- submitResult{resolution: resolution, err: err}
+	}()
+
+	pending := awaitEvent(t, events)
+	if got := pending.Approval.Advice; got == nil || got.Model != "d3" || got.Risk != nil || got.Error != "" {
+		t.Fatalf("pending advice = %+v, want d3 without an answer", got)
+	}
+	select {
+	case count := <-pendingAtCallback:
+		if count != 1 {
+			t.Fatalf("pending approvals when onPending ran = %d, want 1", count)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("onPending did not run")
+	}
+
+	risk := 0.91
+	answered := advice
+	answered.Risk = &risk
+	if err := store.Advise("req-advice", answered); err != nil {
+		t.Fatalf("Advise() error = %v", err)
+	}
+	// The store keeps a copy, so this doesn't reach the event.
+	risk = 0
+	event := awaitEvent(t, events)
+	if got := event.Approval.Advice; event.Kind != EventAdvice || got == nil || got.Risk == nil || *got.Risk != 0.91 {
+		t.Fatalf("advice event = %+v, want risk 0.91", event)
+	}
+
+	if _, err := store.Decide("req-advice", StateDenied, ""); err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	_ = awaitEvent(t, events)
+	_ = awaitResult(t, result)
+
+	late := advice
+	late.Error = "connection refused"
+	if err := store.Advise("req-advice", late); err != nil {
+		t.Fatalf("Advise() after the decision error = %v", err)
+	}
+	if event := awaitEvent(t, events); event.Kind != EventAdvice || event.Approval.State != StateDenied {
+		t.Fatalf("late advice event = %+v, want the denied approval", event)
+	}
+	if got := store.Recent()[0].Advice; got == nil || got.Error != "connection refused" {
+		t.Fatalf("recent advice = %+v, want the late error", got)
+	}
+	if err := store.Advise("missing", late); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Advise() of an unknown request error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStoreSessionGrantReleasesWithoutAdvice(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 4)
+	result := submitAsync(store, testEnvelope("req-grant"), time.Second)
+	waitForPending(t, store, 1)
+	if _, err := store.DecideForSession("req-grant", "approved for session"); err != nil {
+		t.Fatalf("DecideForSession() error = %v", err)
+	}
+	_ = awaitResult(t, result)
+
+	ran := false
+	resolution, err := store.SubmitAdvised(
+		context.Background(),
+		testEnvelope("req-repeat"),
+		time.Second,
+		&Advice{Model: "d3", Ask: "Is this risky?", Mode: "advise"},
+		func() { ran = true },
+	)
+	if err != nil || resolution.State != StateGranted {
+		t.Fatalf("SubmitAdvised() = %+v, %v; want a session grant", resolution, err)
+	}
+	if ran {
+		t.Fatal("onPending ran for a request a session approval released")
+	}
+	if got := store.Recent()[0].Advice; got != nil {
+		t.Fatalf("released request advice = %+v, want none", got)
+	}
+}
+
 func TestStoreShutdownClosesSubscriptions(t *testing.T) {
 	t.Parallel()
 

@@ -207,6 +207,16 @@ function neighbourOf(id: string): string {
   return requestID(pending[index + 1] ?? pending[index - 1]);
 }
 
+// Advice changes what the card says and can move its buttons, so the shown request re-arms.
+function applyAdvice(approval: Approval) {
+  const id = requestID(approval);
+  const list = approval.state === "pending" ? state.pending : state.recent;
+  if (!list.has(id)) return;
+  list.set(id, approval);
+  if (approval.state === "pending" && requestID(shownApproval()) === id) startArming();
+  emit();
+}
+
 function applyGrants(list: SessionGrant[]) {
   state.grants = Array.isArray(list) ? list : [];
   emit();
@@ -257,6 +267,7 @@ function connectEvents() {
   events.addEventListener("pending", (event) => parseEvent(event, applyPending));
   events.addEventListener("resolved", (event) => parseEvent(event, applyResolved));
   events.addEventListener("grants", (event) => parseEvent(event, applyGrants));
+  events.addEventListener("advice", (event) => parseEvent(event, applyAdvice));
   events.addEventListener("error", () => {
     stateVersion++;
     setConnection("offline", "Reconnecting");

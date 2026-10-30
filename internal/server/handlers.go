@@ -2,16 +2,19 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/acidghost/nono-hitl/internal/approval"
+	"github.com/acidghost/nono-hitl/internal/classifier"
 	"github.com/acidghost/nono-hitl/internal/webui"
 )
 
@@ -81,7 +84,7 @@ func (s *Server) handleWebhook(writer http.ResponseWriter, request *http.Request
 		return
 	}
 
-	resolution, err := s.store.Submit(request.Context(), envelope, s.config.DecisionTimeout)
+	resolution, err := s.submit(request.Context(), envelope)
 	if err != nil {
 		writeJSON(writer, http.StatusOK, decisionResponse{
 			Decision: "denied",
@@ -90,6 +93,41 @@ func (s *Server) handleWebhook(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	writeResolution(writer, resolution)
+}
+
+// submit queues the request for a human. A request matching a classifier
+// entry also goes to the decision model, whose answer lands on the card while
+// the request waits.
+func (s *Server) submit(ctx context.Context, envelope approval.WebhookEnvelope) (approval.Resolution, error) {
+	request := envelope.Request
+	entry, matched := classifier.Match(s.config.File.Classifiers, request.Command, request.Args)
+	if !matched {
+		return s.store.Submit(ctx, envelope, s.config.DecisionTimeout)
+	}
+	advice := approval.Advice{
+		Model:   entry.Model,
+		Ask:     entry.Ask,
+		MaxRisk: entry.MaxRisk,
+		Mode:    string(entry.Mode),
+	}
+	return s.store.SubmitAdvised(ctx, envelope, s.config.DecisionTimeout, &advice, func() {
+		go s.advise(request, entry, advice)
+	})
+}
+
+// advise asks the model under a context of its own, so the answer still
+// reaches History when a human decides first.
+func (s *Server) advise(request approval.CommandRequest, entry classifier.Entry, advice approval.Advice) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.ClassifierTimeout)
+	defer cancel()
+	risk, err := s.ollama.Risk(ctx, entry, request.Command, request.Args)
+	if err != nil {
+		advice.Error = err.Error()
+		log.Printf("classifier %s for %q: %v", entry.Model, request.RequestID, err)
+	} else {
+		advice.Risk = &risk
+	}
+	_ = s.store.Advise(request.RequestID, advice)
 }
 
 func (s *Server) handleSnapshot(writer http.ResponseWriter, _ *http.Request) {
