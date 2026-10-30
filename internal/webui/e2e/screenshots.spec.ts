@@ -160,14 +160,14 @@ test("offline", async ({ page, hitl, ui }) => {
   await shoot(page, "offline");
 });
 
-test("classifiers", async ({ page, ui }) => {
+test("config", async ({ page, ui }) => {
   await ui.open();
   await page.keyboard.press("c");
   await ui.addClassifier.click();
   await ui.classifier(2).getByLabel("Prefix").fill("docker run");
   await ui.classifier(2).getByLabel("Ask").fill("Does this docker run command mount host paths?");
-  await expect(ui.classifiersStatus).toHaveText("Unsaved changes");
-  await shoot(page, "classifiers");
+  await expect(ui.configStatus).toHaveText("Unsaved changes");
+  await shoot(page, "config");
 });
 
 test("help", async ({ page, ui }) => {

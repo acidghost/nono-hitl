@@ -151,9 +151,9 @@ holds an absolute path, `~/.config/nono-hitl/config.json` otherwise. The service
 reads it at startup, so restart it after a hand edit. A missing file leaves
 every setting at its default, which means no classifiers. An invalid one,
 unknown fields included, stops the service from starting. Saving from the
-[Classifiers view](#command-classifier) rewrites the file, dropping hand edits
-made since the service started. [`config.json`](examples/config.json) is a
-starting point, and the [command classifier](#command-classifier) section
+[Config view](#browser-dashboard-and-notifications) rewrites the file, dropping
+hand edits made since the service started. [`config.json`](examples/config.json)
+is a starting point, and the [command classifier](#command-classifier) section
 explains its fields.
 
 Stopping the process with `SIGINT` or `SIGTERM` denies all pending requests and
@@ -168,10 +168,10 @@ The dashboard has four views. **Pending** shows waiting requests as tabs above
 the request card, with the decision buttons right below the arguments.
 **Sessions** lists session approvals grouped by nono session, and **History**
 lists recent decisions; select one to open its card with the final outcome.
-**Classifiers** edits the [command classifiers](#command-classifier). Approval
-does not report whether the command executed successfully. Decisions are
-disabled while disconnected, until the request state is reconciled, and once the
-deadline has passed.
+**Config** shows the config file's `ollama_url` and edits its
+[command classifiers](#command-classifier). Approval does not report whether the
+command executed successfully. Decisions are disabled while disconnected, until
+the request state is reconciled, and once the deadline has passed.
 
 **Deny with note** sends a note with the denial. nono puts the denial reason in
 the error the agent gets for the blocked command, so a note such as "use gh pr
@@ -271,7 +271,7 @@ longer than 15 seconds shows **Unavailable** and the reason, which also goes to
 stderr. Advice arriving re-arms the approve buttons. Requests released by a
 session approval skip the model, and History keeps the advice of the others.
 
-The **Classifiers** view edits the same list. Changes stay in the browser until
+The **Config** view edits the same list. Changes stay in the browser until
 **Save** sends the whole list. The service checks it as it checks the file at
 startup, writes the file with mode 0600 through a temporary file and a rename,
 and only then uses the new entries. A request already waiting keeps the advice
@@ -373,7 +373,7 @@ advice as a hint, never as a reason to skip reading the request.
 - malformed, oversized, duplicate, late, canceled, unsupported, timed-out, and
   shutdown requests do not grant execution;
 - no approval state is written to disk. The one file the service writes is the
-  config file, when the Classifiers view saves.
+  config file, when the Config view saves.
 
 ### Out of scope
 

@@ -1,6 +1,25 @@
-/* Classifiers: one sheet per entry, headed by the argv its prefix matches, then a bar with Save. */
+/* Config: the file's settings, one sheet per classifier headed by the argv its prefix matches,
+ * then a bar with Save. */
 @layer components {
-  .classifiers-intro {
+  .config-file {
+    display: grid;
+    grid-template-columns: var(--label-width) minmax(0, 1fr);
+    gap: var(--space-md);
+    margin: 0 0 var(--space-lg);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--paper);
+    border: var(--stroke-thin) solid var(--rule);
+
+    & dd {
+      margin: 0;
+    }
+  }
+
+  .config-heading {
+    margin-bottom: var(--space-xs);
+  }
+
+  .config-intro {
     max-width: var(--measure-long);
     margin-bottom: var(--space-md);
   }
@@ -166,7 +185,7 @@
   }
 
   /* Stays in reach at the bottom of a long list. */
-  .classifiers-bar {
+  .config-bar {
     position: sticky;
     bottom: 0;
     flex-wrap: wrap;
@@ -176,12 +195,12 @@
     box-shadow: var(--raised-shadow);
   }
 
-  .classifiers-note {
+  .config-status {
     flex: 1 1 16rem;
     min-width: 0;
   }
 
-  .classifiers-error {
+  .config-error {
     color: var(--danger);
   }
 
@@ -196,6 +215,11 @@
 
   /* Single column: labels sit above their fields. */
   @media (max-width: 40rem) {
+    .config-file {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-xs);
+    }
+
     .classifier-body {
       grid-template-columns: minmax(0, 1fr);
       gap: var(--space-xs);

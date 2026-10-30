@@ -284,8 +284,8 @@ function dashboard(page: Page) {
     classifier: (number: number) =>
       page.getByRole("group", { name: `Classifier ${number}`, exact: true }),
     addClassifier: page.getByRole("button", { name: "Add classifier" }),
-    saveClassifiers: page.getByRole("button", { name: "Save" }),
-    classifiersStatus: page.locator("#classifiers-status"),
+    saveConfig: page.getByRole("button", { name: "Save" }),
+    configStatus: page.locator("#config-status"),
 
     async open() {
       await page.goto("/");

@@ -1,4 +1,4 @@
-import "./Classifiers.css";
+import "./Config.css";
 import { useEffect } from "preact/hooks";
 import { displayArg, prefixTokens } from "../format";
 import {
@@ -6,33 +6,41 @@ import {
   type DraftClassifier,
   type DraftField,
   editClassifier,
-  loadClassifiers,
+  loadConfig,
   removeClassifier,
-  saveClassifiers,
+  saveConfig,
   state,
 } from "../store";
 
-// The config file's classifiers as one form. Edits stay in the browser until Save sends the
-// whole list. Shortcuts skip inputs, so typing an ask can't switch views.
-export function Classifiers() {
-  useEffect(() => void loadClassifiers(), []);
-  const { draft, ollamaURL, changed, saving, error } = state.classifiers;
+// The config file as one form: settings first, then the classifiers. Edits stay in the browser
+// until Save sends them. Shortcuts skip inputs, so typing an ask can't switch views.
+export function Config() {
+  useEffect(() => void loadConfig(), []);
+  const { draft, ollamaURL, changed, saving, error } = state.config;
   if (!draft) {
     return (
-      <p class="list-empty text-muted" id="classifiers-loading">
-        {error || "Loading classifiers…"}
+      <p class="list-empty text-muted" id="config-loading">
+        {error || "Loading the config…"}
       </p>
     );
   }
   return (
     <form
-      id="classifiers"
+      id="config"
       onSubmit={(event) => {
         event.preventDefault();
-        void saveClassifiers();
+        void saveConfig();
       }}
     >
-      <p class="classifiers-intro text-muted">
+      <dl class="config-file">
+        <dt class="text-muted">Ollama URL</dt>
+        <dd class="break-anywhere">
+          <code id="ollama-url">{ollamaURL}</code>{" "}
+          <span class="text-small text-muted">Edit the config file to change it.</span>
+        </dd>
+      </dl>
+      <h2 class="config-heading">Classifiers</h2>
+      <p class="config-intro text-muted">
         A request whose arguments start with a prefix gets the model's answer to the ask on its
         card. The longest prefix wins.
       </p>
@@ -42,19 +50,16 @@ export function Classifiers() {
       <button class="add-classifier" type="button" onClick={addClassifier}>
         Add classifier
       </button>
-      <div class="classifiers-bar row">
-        <div class="classifiers-note break-anywhere">
-          <p id="classifiers-status" role="status">
-            {error ? (
-              <strong class="classifiers-error">{error}</strong>
-            ) : (
-              changed && <strong>Unsaved changes</strong>
-            )}
-          </p>
-          <p class="text-small text-muted">
-            Calls go to <code id="ollama-url">{ollamaURL}</code>, set in the config file.
-          </p>
-        </div>
+      <div class="config-bar row">
+        <p class="config-status break-anywhere" id="config-status" role="status">
+          {error ? (
+            <strong class="config-error">{error}</strong>
+          ) : changed ? (
+            <strong>Unsaved changes</strong>
+          ) : (
+            <span class="text-muted">No unsaved changes</span>
+          )}
+        </p>
         <button class="save-button" type="submit" disabled={saving || !changed}>
           Save
         </button>

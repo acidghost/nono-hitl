@@ -57,7 +57,7 @@ const viewKeys: Record<string, View> = {
   p: "pending",
   s: "sessions",
   h: "history",
-  c: "classifiers",
+  c: "config",
 };
 
 function handleKey(key: string, shift: boolean, gap: number): boolean {
@@ -71,7 +71,7 @@ function handleKey(key: string, shift: boolean, gap: number): boolean {
     showView(view);
     return true;
   }
-  if (state.view === "classifiers") return false;
+  if (state.view === "config") return false;
   if (state.view !== "pending") return handleListKey(key, shift);
   if (key === "j" || key === "ArrowDown" || key === "ArrowRight") return moveSelection(1);
   if (key === "k" || key === "ArrowUp" || key === "ArrowLeft") return moveSelection(-1);

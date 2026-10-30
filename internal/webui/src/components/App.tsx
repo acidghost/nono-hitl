@@ -2,7 +2,7 @@ import "./App.css";
 import type { TargetedKeyboardEvent } from "preact";
 import { requestID, safeInline } from "../format";
 import { rows, setFilter, shownApproval, sortedPending, state } from "../store";
-import { Classifiers } from "./Classifiers";
+import { Config } from "./Config";
 import { Help } from "./Help";
 import { BackButton, History } from "./History";
 import { Queue } from "./Queue";
@@ -31,7 +31,7 @@ export function App() {
           )}
           {state.view === "pending" && <Queue />}
           {lists && <ListView />}
-          {state.view === "classifiers" && <Classifiers />}
+          {state.view === "config" && <Config />}
           {state.openedID && <BackButton />}
           {shown && <RequestCard key={requestID(shown)} approval={shown} />}
           {state.view === "pending" && sortedPending().length === 0 && <EmptySheet />}

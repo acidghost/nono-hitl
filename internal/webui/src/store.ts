@@ -30,7 +30,7 @@ import type {
 export const armMilliseconds = 1000;
 export const quietMilliseconds = 300;
 
-export const views = ["pending", "sessions", "history", "classifiers"] as const;
+export const views = ["pending", "sessions", "history", "config"] as const;
 export type View = (typeof views)[number];
 export type Connection = "connecting" | "online" | "offline";
 export type Scope = "once" | "session";
@@ -90,8 +90,8 @@ export const state = {
   // The deny note form stands in for the action row.
   noteOpen: false,
   shortcutsOn: true,
-  // The Classifiers view edits a copy of the config's entries until Save sends them all.
-  classifiers: {
+  // The Config view edits a copy of the config file until Save sends it.
+  config: {
     ollamaURL: "",
     draft: undefined as DraftClassifier[] | undefined,
     changed: false,
@@ -398,8 +398,8 @@ export async function revoke(ids: string[]) {
 }
 
 // Called when the view opens. Unsaved edits win over the file.
-export async function loadClassifiers() {
-  if (state.classifiers.changed) return;
+export async function loadConfig() {
+  if (state.config.changed) return;
   try {
     const response = await fetch("/api/v1/config", {
       credentials: "omit",
@@ -407,19 +407,19 @@ export async function loadClassifiers() {
     });
     if (!response.ok) throw new Error(`config returned HTTP ${response.status}`);
     const file = await response.json();
-    if (!state.classifiers.changed) applyConfig(file);
+    if (!state.config.changed) applyConfig(file);
   } catch (error) {
-    state.classifiers.error = `Could not load classifiers: ${safeInline(errorMessage(error), 160)}`;
+    state.config.error = `Could not load the config: ${safeInline(errorMessage(error), 160)}`;
     emit();
   }
 }
 
 function applyConfig(file: Partial<ConfigFile>) {
   const entries = Array.isArray(file?.classifiers) ? file.classifiers : [];
-  state.classifiers.ollamaURL = String(file?.ollama_url ?? "");
-  state.classifiers.draft = entries.map(toDraft);
-  state.classifiers.changed = false;
-  state.classifiers.error = "";
+  state.config.ollamaURL = String(file?.ollama_url ?? "");
+  state.config.draft = entries.map(toDraft);
+  state.config.changed = false;
+  state.config.error = "";
   emit();
 }
 
@@ -446,32 +446,32 @@ function fromDraft(draft: DraftClassifier): Classifier {
 
 export function addClassifier() {
   const entry = { prefix: [], ask: "", model: "d3", max_risk: 0.3, mode: "advise" };
-  state.classifiers.draft?.push(toDraft(entry));
+  state.config.draft?.push(toDraft(entry));
   changeDraft();
 }
 
 export function editClassifier(key: number, field: DraftField, value: string) {
-  const entry = state.classifiers.draft?.find((draft) => draft.key === key);
+  const entry = state.config.draft?.find((draft) => draft.key === key);
   if (entry) entry[field] = value;
   changeDraft();
 }
 
 export function removeClassifier(key: number) {
-  state.classifiers.draft = state.classifiers.draft?.filter((draft) => draft.key !== key);
+  state.config.draft = state.config.draft?.filter((draft) => draft.key !== key);
   changeDraft();
 }
 
 function changeDraft() {
-  state.classifiers.changed = true;
+  state.config.changed = true;
   emit();
 }
 
 // The server checks the whole list, writes the config file, and only then uses it.
-export async function saveClassifiers() {
-  const { draft, saving } = state.classifiers;
+export async function saveConfig() {
+  const { draft, saving } = state.config;
   if (!draft || saving) return;
-  state.classifiers.saving = true;
-  state.classifiers.error = "";
+  state.config.saving = true;
+  state.config.error = "";
   emit();
   try {
     const response = await fetch("/api/v1/config", {
@@ -483,11 +483,11 @@ export async function saveClassifiers() {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `saving returned HTTP ${response.status}`);
     applyConfig(payload);
-    notice("Classifiers saved.");
+    notice("Config saved.");
   } catch (error) {
-    state.classifiers.error = configError(safeInline(errorMessage(error), 300));
+    state.config.error = configError(safeInline(errorMessage(error), 300));
   } finally {
-    state.classifiers.saving = false;
+    state.config.saving = false;
     emit();
   }
 }
