@@ -2,7 +2,7 @@ import { dockerAsk, expect, test } from "./fixtures";
 
 const pushAsk = "Does this git push rewrite published history?";
 
-test("an added classifier advises the next request and survives a reload", async ({
+test("an added classifier decides the next request and survives a reload", async ({
   page,
   hitl,
   ui,
@@ -13,15 +13,15 @@ test("an added classifier advises the next request and survives a reload", async
   await ui.addClassifier.click();
   const added = ui.classifier(2);
   await expect(added.getByLabel("Model")).toHaveValue("d3");
+  await expect(added.getByRole("combobox")).toHaveValue("deny");
   await added.getByLabel("Prefix").fill("git push");
   await added.getByLabel("Ask").fill(pushAsk);
   await ui.saveConfig.click();
   await expect(ui.toast).toHaveText("Config saved.");
 
-  await page.keyboard.press("p");
-  const { id } = await hitl.submit(["git", "push", "origin", "main"]);
-  await ui.shown(id);
-  await expect(ui.advice).toContainText(`Asked d3: ${pushAsk}`);
+  // The fake model finds git push safe.
+  const { decision } = await hitl.submit(["git", "push", "origin", "main"]);
+  expect(await decision).toEqual({ decision: "granted" });
 
   await page.goto("/#config");
   await expect(ui.classifier(2).getByLabel("Prefix")).toHaveValue("git push");

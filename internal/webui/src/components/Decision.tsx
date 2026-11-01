@@ -146,13 +146,16 @@ function NoteForm({ id, disabled }: { id: string; disabled: boolean }) {
   );
 }
 
+// The reason says who decided; for the classifier the title adds that no human was asked.
 function Outcome({ approval }: { approval: Approval }) {
   const title =
-    approval.state !== "granted"
-      ? "This request did not receive approval."
-      : approval.resolution?.scope === "session"
-        ? "Approval granted for this nono session."
-        : "Approval granted for this invocation.";
+    approval.resolution?.decided_by === "classifier"
+      ? "No human saw this request."
+      : approval.state !== "granted"
+        ? "This request did not receive approval."
+        : approval.resolution?.scope === "session"
+          ? "Approval granted for this nono session."
+          : "Approval granted for this invocation.";
   return (
     <div id="terminal" class="terminal row spread">
       <div>

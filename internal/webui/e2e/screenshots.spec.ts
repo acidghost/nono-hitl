@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { dockerClassifier, expect, test } from "./fixtures";
 
 // Local review aid only: baselines stay out of git and the suite never runs in CI.
 
@@ -127,6 +127,19 @@ test("history, approved and denied", async ({ page, hitl, ui }) => {
   await page.keyboard.press("Escape");
   await ui.history.filter({ hasText: "Denied" }).click();
   await shoot(page, "denied");
+});
+
+test("decided by the classifier", async ({ page, hitl, ui }) => {
+  await hitl.configure([dockerClassifier("deny")]);
+  await ui.open();
+  const { decision } = await hitl.submit(["docker", "run", "--rm", "-v", "/:/host", "alpine"], {
+    sessionID: "otter",
+  });
+  await decision;
+  await page.keyboard.press("h");
+  await ui.history.first().click();
+  await expect(ui.outcome).toContainText("No human saw this request.");
+  await shoot(page, "classifier-denied");
 });
 
 test("sessions", async ({ page, hitl, ui }) => {

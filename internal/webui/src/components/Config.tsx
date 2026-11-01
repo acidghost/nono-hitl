@@ -41,8 +41,8 @@ export function Config() {
       </dl>
       <h2 class="config-heading">Classifiers</h2>
       <p class="config-intro text-muted">
-        A request whose arguments start with a prefix gets the model's answer to the ask on its
-        card. The longest prefix wins.
+        The model answers the ask for every request whose arguments start with a prefix, and the
+        mode says what the answer does. The longest prefix wins.
       </p>
       {draft.map((entry, index) => (
         <ClassifierFields key={entry.key} entry={entry} number={index + 1} />
@@ -67,6 +67,12 @@ export function Config() {
     </form>
   );
 }
+
+const modeHints: Record<string, string> = {
+  advise: "The answer shows on the card, and a human decides.",
+  deny: "A pass approves and a fail denies. No human sees the request.",
+  forward: "A pass approves. A fail waits for a human, with the answer on the card.",
+};
 
 // The header previews the prefix as the argv chips of a request card it would match.
 function ClassifierFields({ entry, number }: { entry: DraftClassifier; number: number }) {
@@ -112,7 +118,7 @@ function ClassifierFields({ entry, number }: { entry: DraftClassifier; number: n
         <label class="text-muted" for={id("ask")}>
           Ask
         </label>
-        <div class="classifier-ask">
+        <div class="classifier-field">
           <textarea
             id={id("ask")}
             rows={2}
@@ -129,22 +135,34 @@ function ClassifierFields({ entry, number }: { entry: DraftClassifier; number: n
         <label class="text-muted" for={id("model")}>
           Model
         </label>
-        <div class="row">
-          <input
-            class="classifier-model"
-            id={id("model")}
-            value={entry.model}
-            required
-            autocomplete="off"
-            spellcheck={false}
-            onInput={edit("model")}
-          />
-          <label class="row gap-small text-muted" for={id("mode")}>
-            Mode
-            <select id={id("mode")} value={entry.mode} onChange={edit("mode")}>
-              <option value="advise">advise</option>
-            </select>
-          </label>
+        <div class="classifier-field">
+          <div class="row">
+            <input
+              class="classifier-model"
+              id={id("model")}
+              value={entry.model}
+              required
+              autocomplete="off"
+              spellcheck={false}
+              onInput={edit("model")}
+            />
+            <label class="row gap-small text-muted" for={id("mode")}>
+              Mode
+              <select
+                id={id("mode")}
+                value={entry.mode}
+                aria-describedby={`${id("mode")}-hint`}
+                onChange={edit("mode")}
+              >
+                <option value="advise">advise</option>
+                <option value="deny">deny</option>
+                <option value="forward">forward</option>
+              </select>
+            </label>
+          </div>
+          <p class="text-small text-muted" id={`${id("mode")}-hint`}>
+            {modeHints[entry.mode] ?? ""}
+          </p>
         </div>
         <label class="text-muted" for={id("maxRisk")}>
           Max risk

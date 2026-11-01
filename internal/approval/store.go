@@ -36,11 +36,15 @@ const (
 // the same nono session.
 const ScopeSession = "session"
 
+// DecidedByClassifier marks a request a decision model decided without a human.
+const DecidedByClassifier = "classifier"
+
 // Resolution is the terminal result returned to a waiting webhook request.
 type Resolution struct {
 	State      State     `json:"state"`
 	Scope      string    `json:"scope,omitempty"`
 	Reason     string    `json:"reason,omitempty"`
+	DecidedBy  string    `json:"decided_by,omitempty"`
 	ResolvedAt time.Time `json:"resolved_at"`
 }
 
@@ -136,6 +140,7 @@ type Store struct {
 	maxGrants   int
 	lookup      func(sessionID string) (*session.Record, error)
 	closed      bool
+	done        chan struct{}
 }
 
 // NewStore constructs a bounded in-memory approval store.
@@ -160,6 +165,7 @@ func NewStore(config StoreConfig) (*Store, error) {
 		maxRecent:   config.MaxRecent,
 		maxGrants:   config.MaxGrants,
 		lookup:      config.LookupSession,
+		done:        make(chan struct{}),
 	}, nil
 }
 
@@ -184,11 +190,8 @@ func (s *Store) SubmitAdvised(
 	advice *Advice,
 	onPending func(),
 ) (Resolution, error) {
-	if err := envelope.Request.Validate(); err != nil {
+	if err := validateEnvelope(envelope); err != nil {
 		return Resolution{}, err
-	}
-	if envelope.Backend == "" || len(envelope.Backend) > maxBackendBytes {
-		return Resolution{}, fmt.Errorf("%w: invalid backend", ErrInvalidRequest)
 	}
 	if timeout <= 0 {
 		return Resolution{}, errors.New("approval timeout must be positive")
@@ -220,6 +223,58 @@ func (s *Store) SubmitAdvised(
 		<-item.done
 		return resolutionOf(item), nil
 	}
+}
+
+// Release grants a request a session approval covers, as Submit would, and
+// reports whether one did. It queues nothing.
+func (s *Store) Release(envelope WebhookEnvelope, timeout time.Duration) (Resolution, bool, error) {
+	if err := validateEnvelope(envelope); err != nil {
+		return Resolution{}, false, err
+	}
+	record := s.lookupSession(envelope.Request.SessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, released, err := s.admitLocked(envelope, record, timeout)
+	if err != nil || !released {
+		return Resolution{}, false, err
+	}
+	return resolutionOf(item), true, nil
+}
+
+// Record puts a request a decision model granted or denied straight into
+// History, with its advice. A session approval that covers the request by
+// then still releases it.
+func (s *Store) Record(envelope WebhookEnvelope, decision State, reason string, advice Advice) (Resolution, error) {
+	if decision != StateGranted && decision != StateDenied {
+		return Resolution{}, fmt.Errorf("%w: %q", ErrInvalidDecision, decision)
+	}
+	if err := validateEnvelope(envelope); err != nil {
+		return Resolution{}, err
+	}
+	record := s.lookupSession(envelope.Request.SessionID)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, released, err := s.admitLocked(envelope, record, 0)
+	if err != nil {
+		return Resolution{}, err
+	}
+	if released {
+		return resolutionOf(item), nil
+	}
+	resolution := Resolution{
+		State:      decision,
+		Reason:     reason,
+		DecidedBy:  DecidedByClassifier,
+		ResolvedAt: time.Now(),
+	}
+	item.approval.State = decision
+	item.approval.Resolution = &resolution
+	item.approval.Advice = cloneAdvice(&advice)
+	s.rememberLocked(item.approval)
+	s.publishLocked(Event{Kind: EventResolved, Approval: item.approval})
+	return resolution, nil
 }
 
 // Decide grants or denies a pending approval. Only the first terminal
@@ -393,6 +448,11 @@ func (s *Store) Subscribe(buffer int) (<-chan Event, func()) {
 	return events, unsubscribe
 }
 
+// Done is closed by Shutdown.
+func (s *Store) Done() <-chan struct{} {
+	return s.done
+}
+
 // IsClosed reports whether Shutdown has closed the store.
 func (s *Store) IsClosed() bool {
 	s.mu.RLock()
@@ -413,6 +473,7 @@ func (s *Store) Shutdown(reason string) {
 		return
 	}
 	s.closed = true
+	close(s.done)
 
 	for _, item := range s.pending {
 		s.finishLocked(item, StateCanceled, "", reason)
@@ -497,6 +558,30 @@ func (s *Store) add(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	item, released, err := s.admitLocked(envelope, record, timeout)
+	if err != nil || released {
+		return item, false, err
+	}
+	requestID := envelope.Request.RequestID
+	if len(s.pending) >= s.maxPending {
+		return nil, false, ErrStoreFull
+	}
+	item.approval.Advice = cloneAdvice(advice)
+	s.pending[requestID] = item
+	s.publishLocked(Event{Kind: EventPending, Approval: item.approval})
+	item.timer = time.AfterFunc(timeout, func() {
+		_, _ = s.transition(requestID, StateExpired, "approval request timed out")
+	})
+	return item, true, nil
+}
+
+// admitLocked builds the approval of a new request, refusing a closed store
+// and a known request ID. A session grant covering the request releases it.
+func (s *Store) admitLocked(
+	envelope WebhookEnvelope,
+	record *session.Record,
+	timeout time.Duration,
+) (item *entry, released bool, err error) {
 	if s.closed {
 		return nil, false, ErrStoreClosed
 	}
@@ -520,24 +605,15 @@ func (s *Store) add(
 		done: make(chan struct{}),
 	}
 	key := grantKey(envelope.Request)
-	if grant, granted := s.grants[key]; granted {
-		released := s.finishLocked(item, StateGranted, ScopeSession, "Matched session approval")
-		grant.Uses++
-		grant.LastUsedAt = released.ResolvedAt
-		s.grants[key] = grant
-		s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
+	grant, granted := s.grants[key]
+	if !granted {
 		return item, false, nil
 	}
-
-	if len(s.pending) >= s.maxPending {
-		return nil, false, ErrStoreFull
-	}
-	item.approval.Advice = cloneAdvice(advice)
-	s.pending[requestID] = item
-	s.publishLocked(Event{Kind: EventPending, Approval: item.approval})
-	item.timer = time.AfterFunc(timeout, func() {
-		_, _ = s.transition(requestID, StateExpired, "approval request timed out")
-	})
+	resolution := s.finishLocked(item, StateGranted, ScopeSession, "Matched session approval")
+	grant.Uses++
+	grant.LastUsedAt = resolution.ResolvedAt
+	s.grants[key] = grant
+	s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
 	return item, true, nil
 }
 
@@ -610,6 +686,16 @@ func (s *Store) publishLocked(event Event) {
 		default:
 		}
 	}
+}
+
+func validateEnvelope(envelope WebhookEnvelope) error {
+	if err := envelope.Request.Validate(); err != nil {
+		return err
+	}
+	if envelope.Backend == "" || len(envelope.Backend) > maxBackendBytes {
+		return fmt.Errorf("%w: invalid backend", ErrInvalidRequest)
+	}
+	return nil
 }
 
 func resolutionOf(item *entry) Resolution {

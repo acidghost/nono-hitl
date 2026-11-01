@@ -28,6 +28,8 @@ type SessionRecord = {
 
 type Approval = { envelope: { request: { request_id: string } } };
 
+type Classifier = { prefix: string[]; ask: string; model: string; max_risk: number; mode: string };
+
 type Server = { url: string; stateDir: string };
 
 type Hitl = {
@@ -41,6 +43,8 @@ type Hitl = {
     scope?: "once" | "session",
   ): Promise<void>;
   addSession(id: string, record: SessionRecord): Promise<void>;
+  // Replaces the classifiers, as Save in the Config view does.
+  configure(classifiers: Classifier[]): Promise<void>;
 };
 
 export type Dashboard = ReturnType<typeof dashboard>;
@@ -54,6 +58,10 @@ declare global {
 const basePort = 18765;
 
 export const dockerAsk = "Is this docker command dangerous or risky?";
+
+export function dockerClassifier(mode: string): Classifier {
+  return { prefix: ["docker"], ask: dockerAsk, model: "d3", max_risk: 0.3, mode };
+}
 
 export const test = base.extend<{
   decisionTimeout: string;
@@ -76,9 +84,7 @@ export const test = base.extend<{
       config,
       JSON.stringify({
         ollama_url: ollama.url,
-        classifiers: [
-          { prefix: ["docker"], ask: dockerAsk, model: "d3", max_risk: 0.3, mode: "advise" },
-        ],
+        classifiers: [dockerClassifier("advise")],
       }),
     );
     // A server per test keeps queues, history and grants apart. Tests running at the same
@@ -180,6 +186,14 @@ export const test = base.extend<{
         await mkdir(sessions, { recursive: true });
         await writeFile(join(sessions, `${id}.json`), JSON.stringify(record));
       },
+
+      async configure(classifiers) {
+        const response = await request.put("/api/v1/config", {
+          headers: { Origin: server.url },
+          data: { classifiers },
+        });
+        expect(response.ok()).toBe(true);
+      },
     });
   },
 
@@ -275,6 +289,7 @@ function dashboard(page: Page) {
     note: page.getByRole("textbox", { name: "Note for the agent" }),
     toast: page.locator("#toast"),
     advice: page.locator("#advice"),
+    outcome: page.locator("#terminal"),
     offline: page.locator("#offline-banner"),
     filter: page.getByRole("searchbox"),
     help: page.getByRole("dialog", { name: "Help" }),
