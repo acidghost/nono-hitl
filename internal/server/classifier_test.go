@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -175,6 +176,175 @@ func TestClassifierSkipsRequestsReleasedBySessionApprovals(t *testing.T) {
 	}
 	if advice := store.Recent()[0].Advice; advice != nil {
 		t.Fatalf("released request advice = %+v, want none", advice)
+	}
+}
+
+func TestClassifierDecidesUnderDenyAndForward(t *testing.T) {
+	t.Parallel()
+
+	down := func(writer http.ResponseWriter, _ *http.Request) {
+		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "model runner stopped"})
+	}
+	hang := func(_ http.ResponseWriter, request *http.Request) {
+		<-request.Context().Done()
+	}
+	tests := []struct {
+		name   string
+		mode   classifier.Mode
+		answer func(http.ResponseWriter, *http.Request)
+		want   string
+	}{
+		{name: "deny pass", mode: classifier.ModeDeny, answer: noul(0.1), want: "granted"},
+		{name: "deny fail", mode: classifier.ModeDeny, answer: noul(0.91), want: "denied"},
+		{name: "deny down", mode: classifier.ModeDeny, answer: down, want: "denied"},
+		{name: "deny timeout", mode: classifier.ModeDeny, answer: hang, want: "denied"},
+		{name: "forward pass", mode: classifier.ModeForward, answer: noul(0.1), want: "granted"},
+		{name: "forward fail", mode: classifier.ModeForward, answer: noul(0.91), want: "forwarded"},
+		{name: "forward down", mode: classifier.ModeForward, answer: down, want: "forwarded"},
+		{name: "forward timeout", mode: classifier.ModeForward, answer: hang, want: "forwarded"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ollama := newFakeOllama(test.answer)
+			entry := dockerEntry
+			entry.Mode = test.mode
+			service, store := newClassifiedServer(t, ollama, entry)
+			events, unsubscribe := store.Subscribe(8)
+			defer unsubscribe()
+			webhookDone := submitWebhook(service, webhookBody(t, "req-docker", "docker", "run", "alpine"))
+
+			if test.want == "forwarded" {
+				waitForPending(t, store)
+				pending := store.Pending()[0]
+				if advice := pending.Advice; advice == nil || (advice.Risk == nil && advice.Error == "") {
+					t.Fatalf("forwarded advice = %+v, want the model's answer or error", advice)
+				}
+				if left := pending.Deadline.Sub(pending.CreatedAt); left >= service.config.DecisionTimeout {
+					t.Fatalf("forwarded request has %v left, want less than the decision timeout", left)
+				}
+				performDecision(service, "req-docker", `{"decision":"denied"}`, service.origin)
+				assertWebhookDecision(t, awaitHTTPResponse(t, webhookDone).Body, "denied")
+				return
+			}
+
+			var response decisionResponse
+			decodeResponse(t, awaitHTTPResponse(t, webhookDone).Body, &response)
+			if response.Decision != test.want {
+				t.Fatalf("decision = %q, want %q", response.Decision, test.want)
+			}
+			if test.want == "denied" && response.Reason != classifierDenial {
+				t.Fatalf("denial reason = %q, want %q with no score", response.Reason, classifierDenial)
+			}
+			recent := store.Recent()
+			if len(recent) != 1 || recent[0].Resolution.DecidedBy != approval.DecidedByClassifier {
+				t.Fatalf("Recent() = %+v, want one request decided by the classifier", recent)
+			}
+			if advice := recent[0].Advice; advice == nil || advice.Mode != string(test.mode) {
+				t.Fatalf("history advice = %+v, want the %s entry's", advice, test.mode)
+			}
+			for len(events) > 0 {
+				if event := <-events; event.Kind == approval.EventPending {
+					t.Fatal("a request the model decided was queued for a human")
+				}
+			}
+			if got := len(ollama.requests()); got != 1 {
+				t.Fatalf("Ollama calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestClassifierSkipsTheModelForSessionApprovalsInEveryMode(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []classifier.Mode{classifier.ModeDeny, classifier.ModeForward} {
+		t.Run(string(mode), func(t *testing.T) {
+			t.Parallel()
+			ollama := newFakeOllama(noul(0.91))
+			service, store := newClassifiedServer(t, ollama)
+			webhookDone := submitWebhook(service, webhookBody(t, "req-first", "docker", "ps"))
+			waitForPending(t, store)
+			performDecision(service, "req-first", `{"decision":"granted","scope":"session"}`, service.origin)
+			_ = awaitHTTPResponse(t, webhookDone)
+
+			entry := dockerEntry
+			entry.Mode = mode
+			file := config.File{OllamaURL: fakeOllamaURL, Classifiers: []classifier.Entry{entry}}
+			if err := service.saveFile(file); err != nil {
+				t.Fatalf("saveFile() error = %v", err)
+			}
+			repeat := awaitHTTPResponse(t, submitWebhook(service, webhookBody(t, "req-repeat", "docker", "ps")))
+			assertWebhookDecision(t, repeat.Body, "granted")
+			if got := len(ollama.requests()); got != 0 {
+				t.Fatalf("Ollama calls = %d, want 0", got)
+			}
+			if resolution := store.Recent()[0].Resolution; resolution.Scope != approval.ScopeSession {
+				t.Fatalf("resolution = %+v, want a session approval", resolution)
+			}
+		})
+	}
+}
+
+func TestClassifierCallEndsAndDeniesOnShutdown(t *testing.T) {
+	t.Parallel()
+
+	called := make(chan struct{})
+	ollama := newFakeOllama(func(_ http.ResponseWriter, request *http.Request) {
+		close(called)
+		<-request.Context().Done()
+	})
+	entry := dockerEntry
+	entry.Mode = classifier.ModeForward
+	service, store := newClassifiedServer(t, ollama, entry)
+	service.config.ClassifierTimeout = time.Minute
+	webhookDone := submitWebhook(service, webhookBody(t, "req-docker", "docker", "ps"))
+	awaitClosed(t, called)
+
+	store.Shutdown("test shutdown")
+	var response decisionResponse
+	decodeResponse(t, awaitHTTPResponse(t, webhookDone).Body, &response)
+	if response.Decision != "denied" || response.Reason != "Approval service is shutting down" {
+		t.Fatalf("response = %+v, want a denial for the shutdown", response)
+	}
+}
+
+func TestClassifierStopsWhenNonoDropsTheRequest(t *testing.T) {
+	t.Parallel()
+
+	called := make(chan struct{})
+	ollama := newFakeOllama(func(_ http.ResponseWriter, request *http.Request) {
+		close(called)
+		<-request.Context().Done()
+	})
+	entry := dockerEntry
+	entry.Mode = classifier.ModeDeny
+	service, store := newClassifiedServer(t, ollama, entry)
+	service.config.ClassifierTimeout = time.Minute
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request := newRequest(http.MethodPost, "/hooks/nono", webhookBody(t, "req-docker", "docker", "ps")).WithContext(ctx)
+	request.Header.Set("Content-Type", "application/json")
+	served := make(chan struct{})
+	go func() {
+		service.Handler().ServeHTTP(httptest.NewRecorder(), request)
+		close(served)
+	}()
+	awaitClosed(t, called)
+
+	cancel()
+	awaitClosed(t, served)
+	if pending, recent, _ := store.Snapshot(); len(pending) != 0 || len(recent) != 0 {
+		t.Fatalf("Snapshot() = %+v, %+v; want nothing recorded", pending, recent)
+	}
+}
+
+func awaitClosed(t *testing.T, channel <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-channel:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out")
 	}
 }
 

@@ -94,7 +94,8 @@
     font-family: var(--mono);
   }
 
-  .classifier-ask {
+  /* A control and the hint under it. */
+  .classifier-field {
     display: grid;
     gap: var(--space-xs);
   }

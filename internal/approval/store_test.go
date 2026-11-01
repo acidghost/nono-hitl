@@ -366,6 +366,80 @@ func TestStoreSessionGrantReleasesWithoutAdvice(t *testing.T) {
 	}
 }
 
+func TestStoreRecordsModelDecisionsInHistory(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 2, 4)
+	events, unsubscribe := store.Subscribe(4)
+	defer unsubscribe()
+	risk := 0.91
+	advice := Advice{Model: "d3", Ask: "Is this risky?", MaxRisk: 0.3, Mode: "deny", Risk: &risk}
+	resolution, err := store.Record(testEnvelope("req-model"), StateDenied, "Denied by the model", advice)
+	if err != nil || resolution.State != StateDenied || resolution.DecidedBy != DecidedByClassifier {
+		t.Fatalf("Record() = %+v, %v; want a denial decided by the classifier", resolution, err)
+	}
+	if event := awaitEvent(t, events); event.Kind != EventResolved {
+		t.Fatalf("event = %s, want only %s", event.Kind, EventResolved)
+	}
+	recent := store.Recent()
+	if len(recent) != 1 || recent[0].Resolution.DecidedBy != DecidedByClassifier ||
+		recent[0].Advice == nil || *recent[0].Advice.Risk != risk {
+		t.Fatalf("Recent() = %+v, want the decision with its advice", recent)
+	}
+	if len(store.Pending()) != 0 || len(store.Grants()) != 0 {
+		t.Fatalf("Pending() = %v, Grants() = %v; want neither", store.Pending(), store.Grants())
+	}
+
+	if _, err := store.Record(testEnvelope("req-model"), StateGranted, "", advice); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("Record() of a duplicate error = %v, want ErrDuplicate", err)
+	}
+	if _, _, err := store.Release(testEnvelope("req-model"), time.Second); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("Release() of a duplicate error = %v, want ErrDuplicate", err)
+	}
+	if _, err := store.Record(testEnvelope("req-other"), StateExpired, "", advice); !errors.Is(err, ErrInvalidDecision) {
+		t.Fatalf("Record() of an expiry error = %v, want ErrInvalidDecision", err)
+	}
+
+	store.Shutdown("done")
+	select {
+	case <-store.Done():
+	default:
+		t.Fatal("Done() is open after Shutdown()")
+	}
+	if _, err := store.Record(testEnvelope("req-late"), StateGranted, "", advice); !errors.Is(err, ErrStoreClosed) {
+		t.Fatalf("Record() after Shutdown() error = %v, want ErrStoreClosed", err)
+	}
+}
+
+func TestStoreReleaseOnlyAppliesSessionGrants(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 4)
+	if _, released, err := store.Release(testEnvelope("req-early"), time.Second); err != nil || released {
+		t.Fatalf("Release() without a grant = %v, %v; want nothing released", released, err)
+	}
+	if recent := store.Recent(); len(recent) != 0 {
+		t.Fatalf("Recent() = %+v, want nothing recorded", recent)
+	}
+
+	result := submitAsync(store, testEnvelope("req-grant"), time.Second)
+	waitForPending(t, store, 1)
+	if _, err := store.DecideForSession("req-grant", "approved for session"); err != nil {
+		t.Fatalf("DecideForSession() error = %v", err)
+	}
+	_ = awaitResult(t, result)
+
+	resolution, released, err := store.Release(testEnvelope("req-repeat"), time.Second)
+	if err != nil || !released || resolution.Scope != ScopeSession {
+		t.Fatalf("Release() = %+v, %v, %v; want a session grant", resolution, released, err)
+	}
+	// A grant made while the model answered wins over its answer.
+	resolution, err = store.Record(testEnvelope("req-late-grant"), StateDenied, "Denied by the model", Advice{})
+	if err != nil || resolution.State != StateGranted || resolution.DecidedBy != "" {
+		t.Fatalf("Record() = %+v, %v; want a session grant", resolution, err)
+	}
+}
+
 func TestStoreShutdownClosesSubscriptions(t *testing.T) {
 	t.Parallel()
 

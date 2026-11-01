@@ -20,6 +20,11 @@ import (
 )
 
 const (
+	classifierApproval = "Approved by the command classifier."
+	// The agent reads the reason of a denial, so it holds no score to tune
+	// arguments against.
+	classifierDenial = "Denied by the command classifier."
+
 	maxDecisionReasonBytes = 4 * 1024
 	// Fits the most classifiers the config allows, each with the longest ask.
 	maxConfigBodyBytes = 512 * 1024
@@ -108,9 +113,9 @@ func (s *Server) handleWebhook(writer http.ResponseWriter, request *http.Request
 	writeResolution(writer, resolution)
 }
 
-// submit queues the request for a human. A request matching a classifier
-// entry also goes to the decision model, whose answer lands on the card while
-// the request waits.
+// submit queues the request for a human, unless a classifier entry in the deny
+// or forward mode lets the decision model decide it first. Under advise, the
+// model's answer lands on the card while the request waits.
 func (s *Server) submit(ctx context.Context, envelope approval.WebhookEnvelope) (approval.Resolution, error) {
 	request := envelope.Request
 	entry, matched := classifier.Match(s.currentFile().Classifiers, request.Command, request.Args)
@@ -123,6 +128,9 @@ func (s *Server) submit(ctx context.Context, envelope approval.WebhookEnvelope) 
 		MaxRisk: entry.MaxRisk,
 		Mode:    string(entry.Mode),
 	}
+	if entry.Mode != classifier.ModeAdvise {
+		return s.decide(ctx, envelope, entry, advice)
+	}
 	return s.store.SubmitAdvised(ctx, envelope, s.config.DecisionTimeout, &advice, func() {
 		go s.advise(request, entry, advice)
 	})
@@ -133,14 +141,66 @@ func (s *Server) submit(ctx context.Context, envelope approval.WebhookEnvelope) 
 func (s *Server) advise(request approval.CommandRequest, entry classifier.Entry, advice approval.Advice) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ClassifierTimeout)
 	defer cancel()
+	_ = s.store.Advise(request.RequestID, s.ask(ctx, request, entry, advice))
+}
+
+// decide asks the model before anyone sees the request. A pass approves it. A
+// fail denies it under deny, and under forward queues it for a human with the
+// answer on its card, for what is left of the decision timeout.
+func (s *Server) decide(
+	ctx context.Context,
+	envelope approval.WebhookEnvelope,
+	entry classifier.Entry,
+	advice approval.Advice,
+) (approval.Resolution, error) {
+	deadline := time.Now().Add(s.config.DecisionTimeout)
+	// A session approval is a human decision, so the model doesn't get a say.
+	resolution, released, err := s.store.Release(envelope, s.config.DecisionTimeout)
+	if err != nil || released {
+		return resolution, err
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, min(s.config.ClassifierTimeout, s.config.DecisionTimeout))
+	defer cancel()
+	// A shutdown ends the call, and the closed store then denies the request.
+	go func() {
+		select {
+		case <-s.store.Done():
+			cancel()
+		case <-callCtx.Done():
+		}
+	}()
+	advice = s.ask(callCtx, envelope.Request, entry, advice)
+	if err := ctx.Err(); err != nil {
+		return approval.Resolution{}, err
+	}
+
+	switch {
+	case advice.Risk != nil && *advice.Risk <= advice.MaxRisk:
+		return s.store.Record(envelope, approval.StateGranted, classifierApproval, advice)
+	case entry.Mode == classifier.ModeDeny:
+		return s.store.Record(envelope, approval.StateDenied, classifierDenial, advice)
+	default:
+		return s.store.SubmitAdvised(ctx, envelope, time.Until(deadline), &advice, nil)
+	}
+}
+
+// ask returns the advice with the model's answer, or with the reason there is
+// none.
+func (s *Server) ask(
+	ctx context.Context,
+	request approval.CommandRequest,
+	entry classifier.Entry,
+	advice approval.Advice,
+) approval.Advice {
 	risk, err := s.ollama.Risk(ctx, entry, request.Command, request.Args)
 	if err != nil {
 		advice.Error = err.Error()
 		log.Printf("classifier %s for %q: %v", entry.Model, request.RequestID, err)
-	} else {
-		advice.Risk = &risk
+		return advice
 	}
-	_ = s.store.Advise(request.RequestID, advice)
+	advice.Risk = &risk
+	return advice
 }
 
 func (s *Server) handleSnapshot(writer http.ResponseWriter, _ *http.Request) {

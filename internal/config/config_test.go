@@ -92,7 +92,7 @@ func TestLoadRejectsInvalidConfigs(t *testing.T) {
 		{name: "negative max_risk", content: entry(`0.3`, `-0.1`), want: "max_risk"},
 		{name: "max_risk above one", content: entry(`0.3`, `1.5`), want: "max_risk"},
 		{name: "no mode", content: entry(`,"mode":"advise"`, ``), want: "mode must be"},
-		{name: "unknown mode", content: entry(`"advise"`, `"deny"`), want: "mode must be"},
+		{name: "unknown mode", content: entry(`"advise"`, `"block"`), want: "mode must be"},
 		{
 			name:    "repeated prefix",
 			content: `{"classifiers":[` + validEntry + `,` + validEntry + `]}`,

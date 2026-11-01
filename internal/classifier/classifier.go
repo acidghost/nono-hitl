@@ -18,8 +18,15 @@ const (
 // Mode says what the model's answer does to a request.
 type Mode string
 
-// ModeAdvise shows the answer on the request card and decides nothing.
-const ModeAdvise Mode = "advise"
+const (
+	// ModeAdvise shows the answer on the request card and decides nothing.
+	ModeAdvise Mode = "advise"
+	// ModeDeny approves a request that passes and denies one that fails.
+	ModeDeny Mode = "deny"
+	// ModeForward approves a request that passes and leaves one that fails to
+	// a human.
+	ModeForward Mode = "forward"
+)
 
 // Entry attaches an ask to every request whose argv starts with Prefix. The
 // model answers the ask with the probability that it is true, and the
@@ -54,8 +61,8 @@ func (e Entry) Validate() error {
 	if !(e.MaxRisk >= 0 && e.MaxRisk <= 1) {
 		return errors.New("max_risk must be between 0 and 1")
 	}
-	if e.Mode != ModeAdvise {
-		return fmt.Errorf("mode must be %q", ModeAdvise)
+	if e.Mode != ModeAdvise && e.Mode != ModeDeny && e.Mode != ModeForward {
+		return fmt.Errorf("mode must be %q, %q or %q", ModeAdvise, ModeDeny, ModeForward)
 	}
 	return nil
 }

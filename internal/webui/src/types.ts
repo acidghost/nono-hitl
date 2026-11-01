@@ -33,6 +33,8 @@ export type Resolution = {
   state: ApprovalState;
   scope?: string;
   reason?: string;
+  // "classifier" when a decision model decided without a human.
+  decided_by?: string;
   resolved_at: string;
 };
 

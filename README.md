@@ -223,10 +223,10 @@ disappear when the service restarts.
 ### Command classifier
 
 A classifier attaches a question, the ask, to every request whose arguments
-start with a given prefix. While the request waits, `nono-hitl` sends the
-command and its arguments to a local [Ollama](https://ollama.com) decision model
-and shows the answer on the request card. The model decides nothing: the request
-waits for a human either way.
+start with a given prefix. `nono-hitl` sends the command and its arguments to a
+local [Ollama](https://ollama.com) decision model, and the classifier's mode
+says what the answer does: show it on the request card, or approve and deny
+without a human.
 
 Classifiers live in the [config file](#command-line-usage), next to the
 `ollama_url` they call:
@@ -261,7 +261,12 @@ Classifiers live in the [config file](#command-line-usage), next to the
   true means risky. The request looks safe when the answer is at most
   `max_risk`.
 - `model` must be a decision model, one Ollama serves on `/v1/systemone`.
-- `mode` is required. `advise` is the only mode for now.
+- `mode` is required. Under `advise` the request waits for a human, and the
+  answer shows on its card. Under `deny` and `forward` the model answers before
+  anyone sees the request, and a pass approves it. A fail, a failed call or a
+  timeout denies it under `deny`. Under `forward` it goes to the dashboard with
+  the answer already on its card, for what is left of the decision timeout. New
+  classifiers in the Config view start as `deny`.
 - `ollama_url` is optional and defaults to `http://127.0.0.1:11434`. The command
   and arguments of every matching request go there.
 
@@ -269,7 +274,14 @@ The card shows **Classifying…** until the model answers, then **Looks safe** o
 **Looks risky** with the answer against `max_risk`. A call that fails or takes
 longer than 15 seconds shows **Unavailable** and the reason, which also goes to
 stderr. Advice arriving re-arms the approve buttons. Requests released by a
-session approval skip the model, and History keeps the advice of the others.
+session approval skip the model in every mode, and History keeps the advice of
+the others.
+
+A request the model decided goes straight to History with its advice, and its
+card says no human saw it. It raises no desktop notification. The agent gets
+"Denied by the command classifier." for every classifier denial, without the
+score, so it can't tune its arguments until they pass. The model's approvals
+never create session approvals.
 
 The **Config** view edits the same list. Changes stay in the browser until
 **Save** sends the whole list. The service checks it as it checks the file at
@@ -361,6 +373,14 @@ agent could raise `max_risk` or remove an entry. Command arguments are untrusted
 input to the model, and text in them can lower the risk it reports. Read the
 advice as a hint, never as a reason to skip reading the request.
 
+Under `deny` and `forward`, a low enough risk approves the command with no human
+in the loop, so an agent that writes text into the arguments can try to talk the
+model into a pass. A fake reviewer note in a host chroot command took one of the
+models we tried from 0.96 to 0.04. `forward` doesn't help here, since it only
+changes what happens to a fail. Keep the acting modes to prefixes whose
+arguments are short and structured, and leave commands that carry prose, such as
+commit messages or pull request bodies, on `advise` or without a classifier.
+
 ### Bounded, fail-closed behavior
 
 - at most 32 requests may be pending;
@@ -368,8 +388,8 @@ advice as a hint, never as a reason to skip reading the request.
 - at most 64 session approvals are kept; the oldest is evicted first;
 - request bodies, fields, arguments, decision bodies, SSE clients, and
   subscriber buffers are bounded;
-- each classifier call is bounded at 15 seconds and a 64 KiB response, and its
-  answer never decides a request;
+- each classifier call is bounded at 15 seconds and a 64 KiB response, and a
+  call that fails or times out never approves a request;
 - malformed, oversized, duplicate, late, canceled, unsupported, timed-out, and
   shutdown requests do not grant execution;
 - no approval state is written to disk. The one file the service writes is the
@@ -419,6 +439,13 @@ The reason comes from the call to Ollama. Check that Ollama runs at
 `ollama_url`, that `ollama list` shows the model, and that the same ask works
 with `ollama run MODEL --ask`. Ollama refuses models that aren't decision
 models. The first call after Ollama unloads a model can take several seconds.
+Under `deny`, the same failure denies the request.
+
+### The agent gets "Denied by the command classifier."
+
+A classifier in the `deny` mode failed the request. Its card in History shows
+the score and the ask. Raise `max_risk`, rephrase the ask, or switch the
+classifier to `forward` to decide such requests yourself.
 
 ### Notifications do not appear
 

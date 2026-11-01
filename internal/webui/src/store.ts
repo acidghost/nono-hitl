@@ -445,7 +445,7 @@ function fromDraft(draft: DraftClassifier): Classifier {
 }
 
 export function addClassifier() {
-  const entry = { prefix: [], ask: "", model: "d3", max_risk: 0.3, mode: "advise" };
+  const entry = { prefix: [], ask: "", model: "d3", max_risk: 0.3, mode: "deny" };
   state.config.draft?.push(toDraft(entry));
   changeDraft();
 }
