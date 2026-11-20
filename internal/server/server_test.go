@@ -639,7 +639,7 @@ func waitForStreamContent(t *testing.T, response *streamRecorder, fragments ...s
 	}
 }
 
-func TestNetworkWebhookWaitsForAOneShotDecision(t *testing.T) {
+func TestNetworkWebhookWithoutASessionGetsOneShotDecisions(t *testing.T) {
 	t.Parallel()
 
 	service, store := newTestServer(t, nil)
@@ -665,6 +665,32 @@ func TestNetworkWebhookWaitsForAOneShotDecision(t *testing.T) {
 	if response.Decision != "denied" || response.Reason != "use the mirror" {
 		t.Fatalf("webhook response = %+v, want a denial with the note", response)
 	}
+}
+
+func TestNetworkSessionDecisionsReachNono(t *testing.T) {
+	t.Parallel()
+
+	service, store := newTestServer(t, nil)
+	approved := submitWebhook(service, networkWebhookBody(t, "req-approved", "api.example.com", 443, "session-1"))
+	waitForPending(t, store)
+	decision := performDecision(service, "req-approved", `{"decision":"granted","scope":"session"}`, service.origin)
+	if decision.Code != http.StatusOK {
+		t.Fatalf("session grant status = %d: %s", decision.Code, decision.Body.String())
+	}
+	assertWebhookDecision(t, awaitHTTPResponse(t, approved).Body, "granted")
+
+	// The grant stays here, so nono keeps asking and each request is released.
+	released := awaitHTTPResponse(t, submitWebhook(service,
+		networkWebhookBody(t, "req-released", "api.example.com", 443, "session-1")))
+	assertWebhookDecision(t, released.Body, "granted")
+
+	denied := submitWebhook(service, networkWebhookBody(t, "req-denied", "tracker.example.com", 443, "session-1"))
+	waitForPending(t, store)
+	decision = performDecision(service, "req-denied", `{"decision":"denied","scope":"session"}`, service.origin)
+	if decision.Code != http.StatusOK {
+		t.Fatalf("session denial status = %d: %s", decision.Code, decision.Body.String())
+	}
+	assertWebhookDecision(t, awaitHTTPResponse(t, denied).Body, "deny_session")
 }
 
 func TestNetworkWebhookDeniesProtectedPortsWithoutAHuman(t *testing.T) {

@@ -262,11 +262,11 @@ func (s *Server) handleDecision(writer http.ResponseWriter, request *http.Reques
 	case "", "once":
 		resolution, err = s.store.Decide(request.PathValue("id"), state, requested.Reason)
 	case approval.ScopeSession:
-		if state != approval.StateGranted {
-			writeError(writer, http.StatusBadRequest, "only grants can apply to the session")
-			return
+		if state == approval.StateGranted {
+			resolution, err = s.store.DecideForSession(request.PathValue("id"), requested.Reason)
+		} else {
+			resolution, err = s.store.DenyForSession(request.PathValue("id"), requested.Reason)
 		}
-		resolution, err = s.store.DecideForSession(request.PathValue("id"), requested.Reason)
 	default:
 		writeError(writer, http.StatusBadRequest, "scope must be once or session")
 		return
@@ -485,6 +485,9 @@ func (s *Server) snapshot() snapshotResponse {
 	return snapshotResponse{Pending: pending, Recent: recent, Grants: grants}
 }
 
+// writeResolution answers nono. A session grant is kept here, so nono gets a
+// plain grant and asks again for each request; a session denial is nono's to
+// keep.
 func writeResolution(writer http.ResponseWriter, resolution approval.Resolution) {
 	if resolution.State == approval.StateGranted {
 		writeJSON(writer, http.StatusOK, decisionResponse{Decision: "granted"})
@@ -494,7 +497,11 @@ func writeResolution(writer http.ResponseWriter, resolution approval.Resolution)
 	if reason == "" {
 		reason = "Approval request denied"
 	}
-	writeJSON(writer, http.StatusOK, decisionResponse{Decision: "denied", Reason: reason})
+	decision := "denied"
+	if resolution.Scope == approval.ScopeSession {
+		decision = "deny_session"
+	}
+	writeJSON(writer, http.StatusOK, decisionResponse{Decision: decision, Reason: reason})
 }
 
 func submissionErrorReason(err error) string {

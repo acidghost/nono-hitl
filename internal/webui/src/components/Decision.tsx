@@ -1,5 +1,5 @@
 import "./Decision.css";
-import { hostPort, isNetwork, requestID, requestOf, stateLabel } from "../format";
+import { hasSession, hostPort, isNetwork, requestID, requestOf, stateLabel } from "../format";
 import {
   approveByClick,
   armMilliseconds,
@@ -30,6 +30,7 @@ function Actions({ approval, sessionLabel }: { approval: Approval; sessionLabel:
   const id = requestID(approval);
   const request = requestOf(approval);
   const network = isNetwork(request);
+  const scoped = hasSession(request);
   const disabled = !canDecide(approval);
   const shortcut = (key: string) => (state.shortcutsOn ? key : undefined);
   const pressing = (scope: Scope) => state.queued?.id === id && state.queued.scope === scope;
@@ -46,9 +47,11 @@ function Actions({ approval, sessionLabel }: { approval: Approval; sessionLabel:
       ) : (
         <div class="action-row row">
           <span class="scope text-small text-muted" id="scope">
-            {network
-              ? `Approval covers one connection to ${hostPort(request)}`
-              : `Session approval covers this exact argv in ${sessionLabel}`}
+            {!network
+              ? `Session approval covers this exact argv in ${sessionLabel}`
+              : scoped
+                ? `Session decisions cover ${hostPort(request)} in ${sessionLabel}`
+                : "No nono session, so each decision covers one connection"}
           </span>
           <div
             class={state.arming ? "actions row gap-small arming" : "actions row gap-small"}
@@ -64,6 +67,18 @@ function Actions({ approval, sessionLabel }: { approval: Approval; sessionLabel:
             >
               <kbd class="hint">⇧N</kbd>Deny with note
             </button>
+            {network && scoped && (
+              <button
+                class="button-deny"
+                id="deny-session"
+                type="button"
+                disabled={disabled}
+                aria-keyshortcuts={shortcut("Shift+D")}
+                onClick={() => void decide(id, "denied", "session")}
+              >
+                <kbd class="hint">⇧D</kbd>Deny for session
+              </button>
+            )}
             <button
               class="deny button-deny"
               id="deny"
@@ -74,7 +89,7 @@ function Actions({ approval, sessionLabel }: { approval: Approval; sessionLabel:
             >
               <kbd class="hint">n</kbd>Deny
             </button>
-            {!network && (
+            {scoped && (
               <button
                 class={pressing("session") ? "armed pressing" : "armed"}
                 id="approve-session"
@@ -157,13 +172,15 @@ function NoteForm({ id, disabled }: { id: string; disabled: boolean }) {
 function Outcome({ approval }: { approval: Approval }) {
   const title = approval.resolution?.decided_by
     ? "No human saw this request."
-    : approval.state !== "granted"
-      ? "This request did not receive approval."
-      : approval.resolution?.scope === "session"
-        ? "Approval granted for this nono session."
-        : isNetwork(requestOf(approval))
-          ? "Approval granted for this connection."
-          : "Approval granted for this invocation.";
+    : approval.state === "denied" && approval.resolution?.scope === "session"
+      ? "Denied for the rest of this nono session."
+      : approval.state !== "granted"
+        ? "This request did not receive approval."
+        : approval.resolution?.scope === "session"
+          ? "Approval granted for this nono session."
+          : isNetwork(requestOf(approval))
+            ? "Approval granted for this connection."
+            : "Approval granted for this invocation.";
   return (
     <div id="terminal" class="terminal row spread">
       <div>

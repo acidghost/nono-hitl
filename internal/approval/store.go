@@ -54,19 +54,23 @@ type Resolution struct {
 }
 
 // SessionGrant approves every later request reporting exactly the same nono
-// session, command, argv, caller, and rule. ID is the approving request's ID.
+// session and, for a command, the same command, argv, caller, and rule, or,
+// for a connection, the same host and port. ID is the approving request's ID.
 // Uses counts the requests it released.
 type SessionGrant struct {
-	ID            string          `json:"id"`
-	SessionID     string          `json:"session_id"`
-	Session       *session.Record `json:"session,omitempty"`
-	Command       string          `json:"command"`
-	Args          []string        `json:"args"`
-	Caller        string          `json:"caller"`
-	InterceptRule string          `json:"intercept_rule"`
-	CreatedAt     time.Time       `json:"created_at"`
-	Uses          int             `json:"uses"`
-	LastUsedAt    time.Time       `json:"last_used_at,omitzero"`
+	ID             string          `json:"id"`
+	CapabilityType string          `json:"capability_type"`
+	SessionID      string          `json:"session_id"`
+	Session        *session.Record `json:"session,omitempty"`
+	Command        string          `json:"command,omitempty"`
+	Args           []string        `json:"args,omitempty"`
+	Caller         string          `json:"caller,omitempty"`
+	InterceptRule  string          `json:"intercept_rule,omitempty"`
+	Host           string          `json:"host,omitempty"`
+	Port           uint16          `json:"port,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	Uses           int             `json:"uses"`
+	LastUsedAt     time.Time       `json:"last_used_at,omitzero"`
 }
 
 // EventKind identifies an approval-store change.
@@ -309,7 +313,7 @@ func (s *Store) Decide(requestID string, decision State, reason string) (Resolut
 
 // DecideForSession grants a pending approval and remembers a session grant
 // for its exact request. Other pending requests matching the grant are
-// granted too.
+// granted too. A request without a nono session can't have one.
 func (s *Store) DecideForSession(requestID string, reason string) (Resolution, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -323,22 +327,25 @@ func (s *Store) DecideForSession(requestID string, reason string) (Resolution, e
 	}
 
 	request := item.approval.Envelope.Request
-	if request.CapabilityType != CapabilityCommand {
-		return Resolution{}, fmt.Errorf("%w: %s request", ErrNoSessionGrant, request.CapabilityType)
+	if request.SessionID == "" {
+		return Resolution{}, fmt.Errorf("%w: no nono session", ErrNoSessionGrant)
 	}
 	key := grantKey(request)
 	if len(s.grants) >= s.maxGrants {
 		s.evictOldestGrantLocked()
 	}
 	grant := SessionGrant{
-		ID:            requestID,
-		SessionID:     request.SessionID,
-		Session:       cloneRecord(item.approval.Session),
-		Command:       request.Command,
-		Args:          append([]string(nil), request.Args...),
-		Caller:        request.Caller,
-		InterceptRule: request.InterceptRule,
-		CreatedAt:     time.Now(),
+		ID:             requestID,
+		CapabilityType: request.CapabilityType,
+		SessionID:      request.SessionID,
+		Session:        cloneRecord(item.approval.Session),
+		Command:        request.Command,
+		Args:           append([]string(nil), request.Args...),
+		Caller:         request.Caller,
+		InterceptRule:  request.InterceptRule,
+		Host:           request.Host,
+		Port:           request.Port,
+		CreatedAt:      time.Now(),
 	}
 
 	resolution := s.finishLocked(item, StateGranted, ScopeSession, reason)
@@ -351,6 +358,32 @@ func (s *Store) DecideForSession(requestID string, reason string) (Resolution, e
 	}
 	s.grants[key] = grant
 	s.publishLocked(Event{Kind: EventGrants, Grants: s.grantsLocked()})
+	return resolution, nil
+}
+
+// DenyForSession denies a pending network request, and every pending one to
+// the same host and port in its nono session. nono remembers the denial for
+// the rest of the session, so nothing is kept here.
+func (s *Store) DenyForSession(requestID string, reason string) (Resolution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item, err := s.pendingItemLocked(requestID)
+	if err != nil {
+		return Resolution{}, err
+	}
+	request := item.approval.Envelope.Request
+	if request.CapabilityType != CapabilityNetwork || request.SessionID == "" {
+		return Resolution{}, fmt.Errorf("%w: only network requests in a nono session", ErrNoSessionGrant)
+	}
+
+	key := grantKey(request)
+	resolution := s.finishLocked(item, StateDenied, ScopeSession, reason)
+	for _, other := range s.pending {
+		if grantKey(other.approval.Envelope.Request) == key {
+			s.finishLocked(other, StateDenied, ScopeSession, "Matched session denial")
+		}
+	}
 	return resolution, nil
 }
 
@@ -554,6 +587,10 @@ func (s *Store) evictOldestGrantLocked() {
 // grantKey identifies the exact request a session grant releases. Quoting
 // keeps field and argument boundaries unambiguous.
 func grantKey(request Request) string {
+	if request.CapabilityType == CapabilityNetwork {
+		return fmt.Sprintf("%q %q %q %d",
+			request.CapabilityType, request.SessionID, request.Host, request.Port)
+	}
 	return fmt.Sprintf("%q %q %q %q %q %q",
 		request.CapabilityType, request.SessionID, request.Command, request.Caller, request.InterceptRule, request.Args)
 }

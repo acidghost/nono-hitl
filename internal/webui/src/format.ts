@@ -92,6 +92,12 @@ export function isNetwork(request: Partial<Request>): boolean {
   return request.capability_type === "network";
 }
 
+// Session decisions need a nono session; standalone nono proxy sends network requests
+// without one.
+export function hasSession(request: Partial<Request>): boolean {
+  return Boolean(request.session_id);
+}
+
 export function kindLabel(request: Partial<Request>): string {
   return isNetwork(request) ? "net" : "cmd";
 }

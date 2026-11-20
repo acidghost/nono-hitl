@@ -10,7 +10,7 @@ import { test as base, expect, type Page } from "@playwright/test";
 export { expect };
 
 // The webhook response: all nono learns about a decision.
-export type Decision = { decision: "granted" | "denied"; reason?: string };
+export type Decision = { decision: "granted" | "denied" | "deny_session"; reason?: string };
 
 export type Submitted = { id: string; decision: Promise<Decision> };
 
@@ -311,6 +311,7 @@ function dashboard(page: Page) {
     kind: page.locator("#kind"),
     approve: page.getByRole("button", { name: "Approve once" }),
     approveSession: page.getByRole("button", { name: "Approve for session" }),
+    denySession: page.getByRole("button", { name: /Deny for session$/ }),
     deny,
     denyWithNote: page.getByRole("button", { name: /Deny with note$/ }),
     note: page.getByRole("textbox", { name: "Note for the agent" }),

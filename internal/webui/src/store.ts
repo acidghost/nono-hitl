@@ -2,7 +2,6 @@
 // functions below, and each one ends in emit(), which re-renders.
 import {
   configError,
-  displayArgs,
   grantID,
   prefixTokens,
   requestID,
@@ -337,7 +336,8 @@ export async function decide(
   state.feedback.set(id, decision === "granted" ? "Approving…" : "Denying…");
   const reasons = {
     once: decision === "granted" ? "Approved once in browser" : "Denied in browser",
-    session: "Approved for session in browser",
+    session:
+      decision === "granted" ? "Approved for session in browser" : "Denied for session in browser",
   };
   const reason = note ? `${reasons[scope]}: ${note}` : reasons[scope];
   emit();
@@ -643,7 +643,7 @@ export function sessionGroups(): SessionGroup[] {
     const record = grants.find((grant) => grant.session)?.session;
     const label = sessionLabel(sessionID, record);
     const where = sessionWhere(record);
-    const shown = grants.filter((grant) => matchesFilter(label, where, displayArgs(grant.args)));
+    const shown = grants.filter((grant) => matchesFilter(label, where, requestSummary(grant)));
     if (shown.length > 0) {
       groups.push({ sessionID, label, where, started: record?.started, grants, shown });
     }

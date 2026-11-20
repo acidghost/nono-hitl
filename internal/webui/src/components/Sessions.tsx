@@ -1,9 +1,10 @@
 import "./Sessions.css";
 import {
-  displayArgs,
   fullTime,
   grantID,
   grantUsage,
+  kindLabel,
+  requestSummary,
   safeInline,
   shortTime,
   timestamp,
@@ -62,7 +63,7 @@ function SessionTitle({ group }: { group: SessionGroup }) {
 }
 
 function GrantRow({ grant, index }: { grant: SessionGrant; index: number }) {
-  const args = displayArgs(grant.args);
+  const args = requestSummary(grant);
   return (
     <div
       class="list-row grant-row"
@@ -71,7 +72,9 @@ function GrantRow({ grant, index }: { grant: SessionGrant; index: number }) {
       aria-current={index === state.rowIndex ? "true" : undefined}
       onFocusIn={() => setRowIndex(index)}
     >
-      <code class="break-anywhere pre-wrap">{args}</code>
+      <code class="break-anywhere pre-wrap">
+        <span class="kind-badge text-small">{kindLabel(grant)}</span> {args}
+      </code>
       <span class="text-small text-muted">
         approved {shortTime(grant.created_at)}, {grantUsage(grant)}
       </span>
