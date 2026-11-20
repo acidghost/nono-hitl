@@ -1,5 +1,13 @@
 // Desktop notifications for requests that arrive while the dashboard is in the background.
-import { commandRequest, requestID, safeInline, truncate } from "./format";
+import {
+  hostPort,
+  isNetwork,
+  requestID,
+  requestOf,
+  safeInline,
+  sessionLabel,
+  truncate,
+} from "./format";
 import type { Approval } from "./types";
 
 const notifiedIDs = new Set<string>();
@@ -14,20 +22,23 @@ export function notify(approval: Approval, show: () => boolean) {
   if (!notificationsSupported() || Notification.permission !== "granted") return;
   if (document.visibilityState === "visible" && document.hasFocus()) return;
 
-  const request = commandRequest(approval);
-  const summary = (Array.isArray(request.args) ? request.args : [])
-    .map((argument) => safeInline(argument, 80))
-    .join(" ");
+  const request = requestOf(approval);
+  const network = isNetwork(request);
+  const summary = network
+    ? sessionLabel(request.session_id, approval.session)
+    : (Array.isArray(request.args) ? request.args : [])
+        .map((argument) => safeInline(argument, 80))
+        .join(" ");
+  const title = network
+    ? `Network request: ${hostPort(request)}`
+    : `Approval requested: ${safeInline(request.command, 40) || "command"}`;
   const id = requestID(approval);
   if (notifiedIDs.has(id)) return;
   try {
-    const notification = new Notification(
-      `Approval requested: ${safeInline(request.command, 40) || "command"}`,
-      {
-        body: truncate(summary || "Open the dashboard to review the request.", 180),
-        tag: `nono-hitl-${truncate(id, 100)}`,
-      },
-    );
+    const notification = new Notification(title, {
+      body: truncate(summary || "Open the dashboard to review the request.", 180),
+      tag: `nono-hitl-${truncate(id, 100)}`,
+    });
     remember(id);
     notification.addEventListener("click", () => {
       window.focus();

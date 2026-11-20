@@ -59,6 +59,7 @@ type Server struct {
 	store         *approval.Store
 	ollama        *classifier.Client
 	host          string
+	port          uint16
 	origin        string
 	handler       http.Handler
 	sseSlots      chan struct{}
@@ -77,7 +78,7 @@ func New(config Config, store *approval.Store) (*Server, error) {
 		return nil, errors.New("approval store is required")
 	}
 	applyDefaults(&config)
-	host, err := validateListenAddress(config.ListenAddress)
+	host, port, err := validateListenAddress(config.ListenAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +110,7 @@ func New(config Config, store *approval.Store) (*Server, error) {
 		store:     store,
 		ollama:    ollama,
 		host:      host,
+		port:      port,
 		origin:    "http://" + host,
 		sseSlots:  make(chan struct{}, config.MaxSSEClients),
 		listening: make(chan struct{}),
@@ -198,18 +200,18 @@ func applyDefaults(config *Config) {
 	}
 }
 
-func validateListenAddress(address string) (string, error) {
+func validateListenAddress(address string) (string, uint16, error) {
 	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
-		return "", fmt.Errorf("invalid listen address %q: %w", address, err)
+		return "", 0, fmt.Errorf("invalid listen address %q: %w", address, err)
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.Equal(net.IPv4(127, 0, 0, 1)) {
-		return "", fmt.Errorf("listen address must use literal 127.0.0.1, got %q", host)
+		return "", 0, fmt.Errorf("listen address must use literal 127.0.0.1, got %q", host)
 	}
 	port, err := strconv.ParseUint(portText, 10, 16)
 	if err != nil || port == 0 {
-		return "", fmt.Errorf("listen address has invalid port %q", portText)
+		return "", 0, fmt.Errorf("listen address has invalid port %q", portText)
 	}
-	return net.JoinHostPort("127.0.0.1", strconv.FormatUint(port, 10)), nil
+	return net.JoinHostPort("127.0.0.1", strconv.FormatUint(port, 10)), uint16(port), nil
 }

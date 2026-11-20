@@ -1,5 +1,5 @@
 // Global shortcuts. Approve keys are guarded so text typed for the terminal can't approve.
-import { grantID } from "./format";
+import { grantID, isNetwork, requestOf } from "./format";
 import {
   cancelQueued,
   canDecide,
@@ -93,7 +93,8 @@ function handleKey(key: string, shift: boolean, gap: number): boolean {
     return true;
   }
   if (key === "y") {
-    approveByKey(shift ? "session" : "once", gap);
+    if (shift && isNetwork(requestOf(shown))) notice("Network requests are approved once.");
+    else approveByKey(shift ? "session" : "once", gap);
     return true;
   }
   return false;

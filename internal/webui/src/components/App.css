@@ -1,6 +1,14 @@
 /* Rules shared across components. App.tsx imports this first, so the files that follow it in
  * the bundle can rely on coming later in the components layer. */
 @layer components {
+  /* cmd or net, on the card, the queue tabs and the history rows. */
+  .kind-badge {
+    flex: none;
+    padding: 0 var(--space-xs);
+    font-family: var(--mono);
+    border: var(--stroke-thin) solid currentColor;
+  }
+
   /* One semantic color feeds the request dot and both stamp sizes. */
   .granted,
   [data-state="granted"] {

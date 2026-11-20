@@ -3,13 +3,17 @@ import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import {
   clip,
-  commandRequest,
-  commandTitle,
   countdown,
   displayArg,
   displayArgs,
   duration,
+  hostPort,
+  hostWarning,
+  isNetwork,
+  kindLabel,
   requestID,
+  requestOf,
+  requestTitle,
   riskComparison,
   rulePath,
   safeInline,
@@ -21,13 +25,14 @@ import {
   verdictLabels,
 } from "../format";
 import { setDetailsOpen, state } from "../store";
-import type { Advice, Approval, CommandRequest, SessionRecord } from "../types";
+import type { Advice, Approval, Request, SessionRecord } from "../types";
 import { Decision } from "./Decision";
 
-// The card for one request: session line, argv, exceptions, advice, decision, then details.
-// App keys it by request ID, so nothing a user expanded carries over to the next request.
+// The card for one request: session line, argv or host, exceptions, advice, decision, then
+// details. App keys it by request ID, so nothing a user expanded carries over to the next request.
 export function RequestCard({ approval }: { approval: Approval }) {
-  const request = commandRequest(approval);
+  const request = requestOf(approval);
+  const network = isNetwork(request);
   const args = Array.isArray(request.args) ? request.args : [];
   const id = requestID(approval);
   const waiting = approval.state === "pending";
@@ -45,9 +50,12 @@ export function RequestCard({ approval }: { approval: Approval }) {
       <div class="deadline-bar" aria-hidden="true" />
       <div class="sheet-body" id="review" tabIndex={-1}>
         <h2 class="sr-only" id="request-title">
-          {commandTitle(approval)}
+          {requestTitle(approval)}
         </h2>
         <p class="who row text-muted">
+          <span class="kind-badge text-small" id="kind">
+            {kindLabel(request)}
+          </span>
           <span>Session</span>
           <strong id="session">{label}</strong>
           {approval.session && (
@@ -61,12 +69,18 @@ export function RequestCard({ approval }: { approval: Approval }) {
               : `${stateLabel(approval.state)} ${shortTime(approval.resolution?.resolved_at)}`}
           </span>
         </p>
-        <div class="argv-chips" id="command">
-          {args.map((arg, index) => (
-            <Chip key={index} arg={arg} command={index === 0} />
-          ))}
-        </div>
-        <Exception request={request} />
+        {network ? (
+          <Connection request={request} />
+        ) : (
+          <>
+            <div class="argv-chips" id="command">
+              {args.map((arg, index) => (
+                <Chip key={index} arg={arg} command={index === 0} />
+              ))}
+            </div>
+            <Exception request={request} />
+          </>
+        )}
         {approval.advice && <AdviceRow advice={approval.advice} />}
       </div>
       <Decision approval={approval} sessionLabel={label} />
@@ -77,36 +91,53 @@ export function RequestCard({ approval }: { approval: Approval }) {
         onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
       >
         <summary class="row gap-small">Details</summary>
-        <dl class="tech-grid" id="technical-data">
-          <Item label="Arguments">
-            <table class="argv-table" aria-label="Argument array, JSON-escaped values">
-              {args.map((arg, index) => (
-                <tr key={index}>
-                  <th class="text-muted" scope="row">
-                    argv[{index}]
-                  </th>
-                  <td>
-                    <code class="pre-wrap">{JSON.stringify(arg)}</code>
-                  </td>
-                </tr>
-              ))}
-            </table>
-          </Item>
-          <Field label="Command" value={JSON.stringify(request.command)} />
-          <Field label="Caller" value={request.caller} />
-          <Field label="Rule" value={rulePath(request)} />
-          <Field label="Reason" value={request.reason || "—"} />
-          <Field label="Session ID" value={request.session_id} />
-          {approval.session && <SessionFields record={approval.session} />}
-          <Field label="Request ID" value={id} />
-          <Field label="Shim PID" value={request.child_pid} />
-          <Field label="Backend" value={approval.envelope?.backend} />
-          <Field label="Received" value={approval.created_at} />
-          <Field label="Deadline" value={approval.deadline} />
-        </dl>
+        {network ? (
+          <dl class="tech-grid" id="technical-data">
+            <Field label="Host" value={JSON.stringify(request.host)} />
+            <Field label="Port" value={request.port} />
+            <Field label="Protocol" value={request.protocol} />
+            <Field label="Resolved IPs" value={displayArgs(request.resolved_ips) || "—"} />
+            <Field label="Reason" value={request.reason || "—"} />
+            <Field label="Session ID" value={request.session_id || "—"} />
+            {approval.session && <SessionFields record={approval.session} />}
+            <Field label="Request ID" value={id} />
+            <Field label="Backend" value={approval.envelope?.backend} />
+            <Field label="Received" value={approval.created_at} />
+            <Field label="Deadline" value={approval.deadline} />
+          </dl>
+        ) : (
+          <dl class="tech-grid" id="technical-data">
+            <Item label="Arguments">
+              <table class="argv-table" aria-label="Argument array, JSON-escaped values">
+                {args.map((arg, index) => (
+                  <tr key={index}>
+                    <th class="text-muted" scope="row">
+                      argv[{index}]
+                    </th>
+                    <td>
+                      <code class="pre-wrap">{JSON.stringify(arg)}</code>
+                    </td>
+                  </tr>
+                ))}
+              </table>
+            </Item>
+            <Field label="Command" value={JSON.stringify(request.command)} />
+            <Field label="Caller" value={request.caller} />
+            <Field label="Rule" value={rulePath(request)} />
+            <Field label="Reason" value={request.reason || "—"} />
+            <Field label="Session ID" value={request.session_id} />
+            {approval.session && <SessionFields record={approval.session} />}
+            <Field label="Request ID" value={id} />
+            <Field label="Shim PID" value={request.child_pid} />
+            <Field label="Backend" value={approval.envelope?.backend} />
+            <Field label="Received" value={approval.created_at} />
+            <Field label="Deadline" value={approval.deadline} />
+          </dl>
+        )}
         <p class="text-small text-muted">
-          The request doesn't include the child's filesystem, network or credential grants. Those
-          live in the nono profile.
+          {network
+            ? "nono doesn't report which process opened the connection, nor the addresses the host resolves to."
+            : "The request doesn't include the child's filesystem, network or credential grants. Those live in the nono profile."}
         </p>
       </details>
     </section>
@@ -137,8 +168,35 @@ function Chip({ arg, command }: { arg: string; command: boolean }) {
   );
 }
 
+// The destination, and a warning when its name says it's this machine or a private network.
+// Approving lets nono's proxy connect there from outside the sandbox.
+function Connection({ request }: { request: Partial<Request> }) {
+  const warning = hostWarning(request.host);
+  return (
+    <>
+      <div class="argv-chips" id="destination">
+        <code class="chip chip-command break-anywhere">{hostPort(request)}</code>
+        <code class="chip">{safeInline(request.protocol, 32)}</code>
+      </div>
+      {warning && (
+        <div class="exception host-warning" id="host-warning" role="note">
+          <p class="exception-reason">{warning}</p>
+          <p class="text-small">
+            Approving lets the agent reach it through nono's proxy, from outside the sandbox.
+          </p>
+        </div>
+      )}
+      {request.reason && (
+        <div class="exception" id="exception">
+          <p class="exception-reason break-anywhere">{safeInline(request.reason, 300)}</p>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Only what differs from a plain agent request reaching the default rule.
-function Exception({ request }: { request: Partial<CommandRequest> }) {
+function Exception({ request }: { request: Partial<Request> }) {
   const launched = request.caller !== "session";
   const matched = request.reason || request.intercept_rule !== "invocation_policy.default";
   if (!launched && !request.reason && !matched) return null;

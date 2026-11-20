@@ -1,10 +1,11 @@
 import "./History.css";
 import {
-  commandRequest,
-  commandTitle,
-  displayArgs,
   fullTime,
+  kindLabel,
   requestID,
+  requestOf,
+  requestSummary,
+  requestTitle,
   safeInline,
   sessionLabel,
   shortTime,
@@ -25,7 +26,7 @@ export function History() {
 }
 
 function HistoryRow({ approval, index }: { approval: Approval; index: number }) {
-  const request = commandRequest(approval);
+  const request = requestOf(approval);
   const id = requestID(approval);
   const resolved = approval.resolution?.resolved_at;
   const how = safeInline(approval.resolution?.reason, 80);
@@ -36,12 +37,15 @@ function HistoryRow({ approval, index }: { approval: Approval; index: number }) 
       type="button"
       data-request-id={id}
       aria-current={index === state.rowIndex ? "true" : undefined}
-      aria-label={`${stateLabel(approval.state)}: ${commandTitle(approval)}, ${fullTime(resolved)}`}
+      aria-label={`${stateLabel(approval.state)}: ${requestTitle(approval)}, ${fullTime(resolved)}`}
       onFocusIn={() => setRowIndex(index)}
       onClick={() => openHistory(id)}
     >
       <span class={`mini-stamp text-small ${approval.state}`}>{stateLabel(approval.state)}</span>
-      <code class="break-anywhere">{safeInline(displayArgs(request.args), 200)}</code>
+      <code class="break-anywhere">
+        <span class="kind-badge text-small">{kindLabel(request)}</span>{" "}
+        {safeInline(requestSummary(request), 200)}
+      </code>
       <time
         class="text-small text-muted"
         dateTime={String(resolved ?? "")}

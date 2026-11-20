@@ -3,13 +3,14 @@
 <img src="internal/webui/logo.svg" alt="nono-hitl logo" width="96" height="96">
 
 `nono-hitl` is a local human-approval backend for
-[nono](https://github.com/nolabs-ai/nono) command policies. It receives
-synchronous webhook requests from nono, shows them in a browser outside the
-wrapped terminal UI, and returns a grant or denial.
+[nono](https://github.com/nolabs-ai/nono) command policies and network
+approvals. It receives synchronous webhook requests from nono, shows them in a
+browser outside the wrapped terminal UI, and returns a grant or denial.
 
 The service accepts command approvals for any program. Approval does not
 construct a sandbox or add privileges: it releases the static delegated-child
-policy already authored in the nono profile.
+policy already authored in the nono profile. A network approval lets nono's
+proxy open one connection to a host outside the profile's allowlist.
 
 ## Security status
 
@@ -297,6 +298,38 @@ echo '{"command":"docker","args":["docker","run","-v","/:/host","alpine"]}' |
   ollama run d3 --ask "Is this docker command dangerous or risky?"
 ```
 
+## Network approvals
+
+With the included
+[`network-approval-profile.jsonc`](examples/network-approval-profile.jsonc)
+overlay, nono asks `nono-hitl` about each connection to a host the base
+profile doesn't allow. Install and promote it like the `gh` overlay, then add
+`--extends network-approval` to `nono run`. It needs nono 0.82 or later.
+
+The overlay turns on strict proxy filtering: every host outside the allowlist
+waits for a human, even when the base profile has no allowlist at all. nono
+sends only the host and port, so cards show those and the session; there is no
+process and no resolved address.
+
+A card with the `net` badge covers one connection. nono asks again for the next
+one, so a package install can raise several requests in a row. Deny with note
+works as for commands: nono returns the note to the client in its `403`
+response. Approve for session isn't available for network requests yet, and
+classifiers never see them.
+
+A card warns when the host names this machine or a private network:
+`localhost`, loopback, private and link-local addresses, and IP addresses
+written in unusual forms such as `127.1`. Approving one lets the agent reach a
+service on the host from outside the sandbox. A public name that resolves to
+loopback gets no warning, because nono doesn't send the addresses it resolved.
+
+`nono-hitl` denies every connection to its own port, and to the port of a
+loopback `ollama_url`, whatever the host, without showing a card. History keeps
+these denials. Otherwise an approved name that resolves to loopback would let
+the agent call the decision API and approve its own requests. The overlay also
+lists the loopback forms of both ports in `deny_domain`, so nono refuses them
+before asking.
+
 ## Profile wiring
 
 `nono-hitl` does not restrict the program named by a command request; nono's
@@ -332,8 +365,8 @@ connection.
 
 ### Untrusted components
 
-- the wrapped agent and its generated commands;
-- all webhook request metadata and command arguments;
+- the wrapped agent, its generated commands and the connections it opens;
+- all webhook request metadata, command arguments and host names;
 - delegated children beyond the exact static capabilities granted by their
   command policy.
 
@@ -356,7 +389,15 @@ hostile process safe.
 Approval releases only the profile's static child sandbox. Request arguments are
 displayed as untrusted text, never shell-parsed or executed by `nono-hitl`, and
 rendered through DOM `textContent`. The service accepts nono command requests
-for any non-empty command name; unsupported capability types fail closed.
+for any non-empty command name and network requests for any host; other
+capability types fail closed.
+
+A network approval makes nono's proxy connect from outside the sandbox, so the
+sandbox no longer keeps the agent away from that destination. That includes
+loopback and private addresses, which nono doesn't refuse on its own, and names
+that resolve to them. The protected-port denial above keeps the agent away from
+`nono-hitl` and a local Ollama only; it doesn't cover other services listening
+on the host. Read the host on each card before approving it.
 
 The service reads nono's session records from the state directory. Session IDs
 are checked against nono's ID rule before building a path, and symlinks,

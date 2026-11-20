@@ -477,14 +477,14 @@ func TestStoreSessionGrantReleasesOnlyExactRequests(t *testing.T) {
 		t.Fatalf("identical request = %+v, %v; want session grant", repeat.resolution, repeat.err)
 	}
 
-	variants := map[string]func(*CommandRequest){
-		"session":        func(r *CommandRequest) { r.SessionID = "session-2" },
-		"command":        func(r *CommandRequest) { r.Command = "git" },
-		"argument":       func(r *CommandRequest) { r.Args = []string{"gh", "status "} },
-		"extra argument": func(r *CommandRequest) { r.Args = []string{"gh", "status", "--json"} },
-		"joined args":    func(r *CommandRequest) { r.Args = []string{"gh status"} },
-		"caller":         func(r *CommandRequest) { r.Caller = "gh" },
-		"rule":           func(r *CommandRequest) { r.InterceptRule = "other" },
+	variants := map[string]func(*Request){
+		"session":        func(r *Request) { r.SessionID = "session-2" },
+		"command":        func(r *Request) { r.Command = "git" },
+		"argument":       func(r *Request) { r.Args = []string{"gh", "status "} },
+		"extra argument": func(r *Request) { r.Args = []string{"gh", "status", "--json"} },
+		"joined args":    func(r *Request) { r.Args = []string{"gh status"} },
+		"caller":         func(r *Request) { r.Caller = "gh" },
+		"rule":           func(r *Request) { r.InterceptRule = "other" },
 	}
 	for name, mutate := range variants {
 		envelope := testEnvelope("req-" + name)
@@ -768,5 +768,60 @@ func awaitResult(t *testing.T, result <-chan submitResult) submitResult {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for Submit()")
 		return submitResult{}
+	}
+}
+
+func TestStoreNetworkRequestsAreDecidedOnceOnly(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 4)
+	result := submitAsync(store, testNetworkEnvelope("req-net"), time.Second)
+	waitForPending(t, store, 1)
+
+	if _, err := store.DecideForSession("req-net", ""); !errors.Is(err, ErrNoSessionGrant) {
+		t.Fatalf("DecideForSession() error = %v, want ErrNoSessionGrant", err)
+	}
+	if _, err := store.Decide("req-net", StateGranted, ""); err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if got := awaitResult(t, result); got.err != nil || got.resolution.State != StateGranted {
+		t.Fatalf("Submit() = %+v, want a grant", got)
+	}
+	if grants := store.Grants(); len(grants) != 0 {
+		t.Fatalf("Grants() = %+v, want none", grants)
+	}
+}
+
+func TestStoreRejectRecordsAServiceDenial(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 4)
+	resolution, err := store.Reject(testNetworkEnvelope("req-net"), "protected port")
+	if err != nil {
+		t.Fatalf("Reject() error = %v", err)
+	}
+	if resolution.State != StateDenied || resolution.DecidedBy != DecidedByService || resolution.Reason != "protected port" {
+		t.Fatalf("Reject() = %+v, want a service denial", resolution)
+	}
+	recent := store.Recent()
+	if len(recent) != 1 || recent[0].Advice != nil || recent[0].Resolution.DecidedBy != DecidedByService {
+		t.Fatalf("Recent() = %+v, want the service denial without advice", recent)
+	}
+	if _, err := store.Reject(testNetworkEnvelope("req-net"), ""); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("Reject() of a duplicate error = %v, want ErrDuplicate", err)
+	}
+}
+
+func testNetworkEnvelope(requestID string) WebhookEnvelope {
+	return WebhookEnvelope{
+		Backend: "nono-hitl",
+		Request: Request{
+			CapabilityType: CapabilityNetwork,
+			RequestID:      requestID,
+			Host:           "api.example.com",
+			Port:           443,
+			Protocol:       "tcp",
+			SessionID:      "session-1",
+		},
 	}
 }
