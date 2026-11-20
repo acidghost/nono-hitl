@@ -1,5 +1,5 @@
 // Global shortcuts. Approve keys are guarded so text typed for the terminal can't approve.
-import { grantID, isNetwork, requestOf } from "./format";
+import { grantID, hasSession, isNetwork, requestOf } from "./format";
 import {
   cancelQueued,
   canDecide,
@@ -93,8 +93,14 @@ function handleKey(key: string, shift: boolean, gap: number): boolean {
     return true;
   }
   if (key === "y") {
-    if (shift && isNetwork(requestOf(shown))) notice("Network requests are approved once.");
+    if (shift && !hasSession(requestOf(shown))) notice("No nono session to approve for.");
     else approveByKey(shift ? "session" : "once", gap);
+    return true;
+  }
+  // Denials need no guard: a stray key can only fail safe.
+  if (key === "d" && shift && isNetwork(requestOf(shown))) {
+    if (hasSession(requestOf(shown))) void decide(state.selectedID, "denied", "session");
+    else notice("No nono session to deny for.");
     return true;
   }
   return false;

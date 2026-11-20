@@ -64,14 +64,18 @@ export type Approval = {
   advice?: Advice;
 };
 
+// A command grant carries the command fields, a network grant host and port.
 export type SessionGrant = {
   id: string;
+  capability_type: string;
   session_id: string;
   session?: SessionRecord;
-  command: string;
-  args: string[];
-  caller: string;
-  intercept_rule: string;
+  command?: string;
+  args?: string[];
+  caller?: string;
+  intercept_rule?: string;
+  host?: string;
+  port?: number;
   created_at: string;
   uses: number;
   last_used_at?: string;

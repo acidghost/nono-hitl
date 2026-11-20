@@ -64,6 +64,7 @@ export function Help() {
         <Keys keys={["⇧Y"]}>Approve for session</Keys>
         <Keys keys={["n"]}>Deny</Keys>
         <Keys keys={["⇧N"]}>Deny with a note for the agent</Keys>
+        <Keys keys={["⇧D"]}>Deny a host for the session</Keys>
         <Keys keys={["i"]}>Details</Keys>
         <Keys keys={["p", "s", "h", "c"]}>Pending, Sessions, History, Config</Keys>
         <Keys keys={["/"]}>Filter sessions or history</Keys>

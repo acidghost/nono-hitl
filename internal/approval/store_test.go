@@ -771,25 +771,107 @@ func awaitResult(t *testing.T, result <-chan submitResult) submitResult {
 	}
 }
 
-func TestStoreNetworkRequestsAreDecidedOnceOnly(t *testing.T) {
+func TestStoreNetworkSessionGrantMatchesSessionHostAndPort(t *testing.T) {
 	t.Parallel()
 
 	store := newTestStore(t, 4, 4)
-	result := submitAsync(store, testNetworkEnvelope("req-net"), time.Second)
+	first := submitAsync(store, testNetworkEnvelope("req-net"), time.Second)
+	waitForPending(t, store, 1)
+	waiting := submitAsync(store, testNetworkEnvelope("req-net-waiting"), time.Second)
+	waitForPending(t, store, 2)
+
+	if _, err := store.DecideForSession("req-net", "approved"); err != nil {
+		t.Fatalf("DecideForSession() error = %v", err)
+	}
+	for _, result := range []<-chan submitResult{first, waiting} {
+		if got := awaitResult(t, result); got.err != nil || got.resolution.State != StateGranted {
+			t.Fatalf("Submit() = %+v, want a grant", got)
+		}
+	}
+
+	released, ok, err := store.Release(testNetworkEnvelope("req-net-later"), time.Second)
+	if err != nil || !ok || released.Scope != ScopeSession {
+		t.Fatalf("Release() = %+v, %v, %v; want a session release", released, ok, err)
+	}
+	variants := map[string]func(*Request){
+		"session": func(r *Request) { r.SessionID = "session-2" },
+		"host":    func(r *Request) { r.Host = "evil.example.com" },
+		"port":    func(r *Request) { r.Port = 80 },
+	}
+	for name, change := range variants {
+		envelope := testNetworkEnvelope("req-" + name)
+		change(&envelope.Request)
+		if _, ok, err := store.Release(envelope, time.Second); ok || err != nil {
+			t.Fatalf("Release() of another %s = %v, %v; want no release", name, ok, err)
+		}
+	}
+
+	grants := store.Grants()
+	if len(grants) != 1 || grants[0].CapabilityType != CapabilityNetwork || grants[0].Host != "api.example.com" ||
+		grants[0].Port != 443 || grants[0].Uses != 2 {
+		t.Fatalf("Grants() = %+v, want one network grant used twice", grants)
+	}
+}
+
+func TestStoreSessionDecisionsNeedANonoSession(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 4)
+	envelope := testNetworkEnvelope("req-net")
+	envelope.Request.SessionID = ""
+	result := submitAsync(store, envelope, time.Second)
 	waitForPending(t, store, 1)
 
 	if _, err := store.DecideForSession("req-net", ""); !errors.Is(err, ErrNoSessionGrant) {
 		t.Fatalf("DecideForSession() error = %v, want ErrNoSessionGrant", err)
 	}
-	if _, err := store.Decide("req-net", StateGranted, ""); err != nil {
+	if _, err := store.DenyForSession("req-net", ""); !errors.Is(err, ErrNoSessionGrant) {
+		t.Fatalf("DenyForSession() error = %v, want ErrNoSessionGrant", err)
+	}
+	if _, err := store.Decide("req-net", StateDenied, ""); err != nil {
 		t.Fatalf("Decide() error = %v", err)
 	}
-	if got := awaitResult(t, result); got.err != nil || got.resolution.State != StateGranted {
-		t.Fatalf("Submit() = %+v, want a grant", got)
+	awaitResult(t, result)
+}
+
+func TestStoreDenyForSessionDeniesMatchingNetworkRequests(t *testing.T) {
+	t.Parallel()
+
+	store := newTestStore(t, 4, 4)
+	first := submitAsync(store, testNetworkEnvelope("req-net"), time.Second)
+	waitForPending(t, store, 1)
+	other := testNetworkEnvelope("req-other-port")
+	other.Request.Port = 80
+	otherResult := submitAsync(store, other, time.Second)
+	waitForPending(t, store, 2)
+	waiting := submitAsync(store, testNetworkEnvelope("req-net-waiting"), time.Second)
+	waitForPending(t, store, 3)
+
+	if _, err := store.DenyForSession("req-net", "not this host"); err != nil {
+		t.Fatalf("DenyForSession() error = %v", err)
+	}
+	for _, result := range []<-chan submitResult{first, waiting} {
+		got := awaitResult(t, result)
+		if got.err != nil || got.resolution.State != StateDenied || got.resolution.Scope != ScopeSession {
+			t.Fatalf("Submit() = %+v, want a session denial", got)
+		}
+	}
+	if pending := store.Pending(); len(pending) != 1 || pending[0].Envelope.Request.RequestID != "req-other-port" {
+		t.Fatalf("Pending() = %+v, want only the other port", pending)
 	}
 	if grants := store.Grants(); len(grants) != 0 {
-		t.Fatalf("Grants() = %+v, want none", grants)
+		t.Fatalf("Grants() = %+v, want none: nono keeps session denials", grants)
 	}
+	_, _ = store.Decide("req-other-port", StateDenied, "")
+	awaitResult(t, otherResult)
+
+	command := submitAsync(store, testEnvelope("req-command"), time.Second)
+	waitForPending(t, store, 1)
+	if _, err := store.DenyForSession("req-command", ""); !errors.Is(err, ErrNoSessionGrant) {
+		t.Fatalf("DenyForSession() of a command error = %v, want ErrNoSessionGrant", err)
+	}
+	_, _ = store.Decide("req-command", StateDenied, "")
+	awaitResult(t, command)
 }
 
 func TestStoreRejectRecordsAServiceDenial(t *testing.T) {

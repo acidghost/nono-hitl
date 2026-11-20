@@ -200,7 +200,8 @@ absence of a browser never grants a command.
 
 **Approve for session** grants the request and also grants later requests from
 the same nono session whose command, argument array, caller, and rule match it
-exactly. Matching requests already waiting are granted at once. The session is
+exactly, or, for a [network request](#network-approvals), whose host and port
+match it. Matching requests already waiting are granted at once. The session is
 the `session_id` nono's supervisor reports for each `nono run`, so a new run
 starts without session approvals.
 
@@ -311,11 +312,21 @@ waits for a human, even when the base profile has no allowlist at all. nono
 sends only the host and port, so cards show those and the session; there is no
 process and no resolved address.
 
-A card with the `net` badge covers one connection. nono asks again for the next
-one, so a package install can raise several requests in a row. Deny with note
-works as for commands: nono returns the note to the client in its `403`
-response. Approve for session isn't available for network requests yet, and
-classifiers never see them.
+Approve once covers one connection, and nono asks again for the next one, so a
+package install can raise several requests in a row. **Approve for session**
+covers every later connection to the same host and port from the same `nono
+run`, as a [session approval](#session-approvals) kept by `nono-hitl`: nono
+still asks each time, the Sessions view lists it with a `net` badge, and
+revoking it makes the next connection wait for a human again.
+
+**Deny for session** (`Shift+D`) denies the host and port for the rest of the
+`nono run`. nono keeps that denial itself and stops asking, so it isn't listed
+in the Sessions view and can't be revoked; start a new run to undo it. Deny with
+note works as for commands: nono returns the note to the client in its `403`
+response.
+
+Standalone `nono proxy` sends requests without a nono session; those cards only
+offer one-shot decisions. Classifiers never see network requests.
 
 A card warns when the host names this machine or a private network:
 `localhost`, loopback, private and link-local addresses, and IP addresses
