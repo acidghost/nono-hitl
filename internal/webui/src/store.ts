@@ -1,13 +1,14 @@
 // Approvals, grants and the dashboard's UI state live in one object. Changes go through the
 // functions below, and each one ends in emit(), which re-renders.
 import {
-  commandRequest,
-  commandTitle,
   configError,
   displayArgs,
   grantID,
   prefixTokens,
   requestID,
+  requestOf,
+  requestSummary,
+  requestTitle,
   safeInline,
   sessionLabel,
   sessionWhere,
@@ -212,8 +213,8 @@ function applyPending(approval: Approval) {
   if (isNew) {
     notifyPending(approval);
     // Off the Pending view only the badge would change, so say it out loud.
-    if (state.view === "pending") announce(`Approval requested for ${commandTitle(approval)}`);
-    else notice(`Approval requested for ${commandTitle(approval)}`);
+    if (state.view === "pending") announce(`Approval requested for ${requestTitle(approval)}`);
+    else notice(`Approval requested for ${requestTitle(approval)}`);
   }
 }
 
@@ -229,7 +230,7 @@ function applyResolved(approval: Approval) {
   state.recent.set(id, approval);
   state.feedback.delete(id);
   emit();
-  notice(`${stateLabel(approval.state)}: ${commandTitle(approval)}`, approval.state);
+  notice(`${stateLabel(approval.state)}: ${requestTitle(approval)}`, approval.state);
 }
 
 function neighbourOf(id: string): string {
@@ -657,9 +658,9 @@ export function historyEntries(): Approval[] {
         timestamp(right.resolution?.resolved_at) - timestamp(left.resolution?.resolved_at),
     )
     .filter((approval) => {
-      const request = commandRequest(approval);
+      const request = requestOf(approval);
       return matchesFilter(
-        displayArgs(request.args),
+        requestSummary(request),
         sessionLabel(request.session_id, approval.session),
         stateLabel(approval.state),
         approval.resolution?.reason,

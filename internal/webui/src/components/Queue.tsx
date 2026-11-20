@@ -1,10 +1,11 @@
 import "./Queue.css";
 import {
-  commandRequest,
-  commandTitle,
   countdown,
   duration,
+  kindLabel,
   requestID,
+  requestOf,
+  requestTitle,
   sessionLabel,
 } from "../format";
 import { selectRequest, sortedPending, state } from "../store";
@@ -41,11 +42,12 @@ function QueueTab({ approval, index }: { approval: Approval; index: number }) {
             <kbd class="hint">{index + 1}</kbd>{" "}
           </>
         )}
-        {commandTitle(approval)}
+        <span class="kind-badge text-small">{kindLabel(requestOf(approval))}</span>{" "}
+        {requestTitle(approval)}
       </span>
       <span class="clock text-small">{duration(remaining)}</span>
       <span class="queue-meta text-small text-muted">
-        {sessionLabel(commandRequest(approval).session_id, approval.session)}
+        {sessionLabel(requestOf(approval).session_id, approval.session)}
       </span>
     </button>
   );

@@ -47,7 +47,7 @@ func TestDecodeWebhookCommand(t *testing.T) {
 func TestDecodeWebhookRejectsUnsupportedCapability(t *testing.T) {
 	t.Parallel()
 
-	payload := `{"backend":"nono-hitl","request":{"capability_type":"network","request_id":"req-1"}}`
+	payload := `{"backend":"nono-hitl","request":{"capability_type":"endpoint","request_id":"req-1"}}`
 	_, err := DecodeWebhook(strings.NewReader(payload))
 	if !errors.Is(err, ErrUnsupportedCapability) {
 		t.Fatalf("error = %v, want ErrUnsupportedCapability", err)
@@ -136,7 +136,7 @@ func testEnvelope(requestID string) WebhookEnvelope {
 	reason := "Needed for the requested task"
 	return WebhookEnvelope{
 		Backend: "nono-hitl",
-		Request: CommandRequest{
+		Request: Request{
 			CapabilityType: CapabilityCommand,
 			RequestID:      requestID,
 			Command:        "gh",
@@ -148,4 +148,82 @@ func testEnvelope(requestID string) WebhookEnvelope {
 			SessionID:      "session-1",
 		},
 	}
+}
+
+func TestDecodeWebhookNetwork(t *testing.T) {
+	t.Parallel()
+
+	envelope, err := DecodeWebhook(strings.NewReader(networkPayload(`"host":"api.example.com"`)))
+	if err != nil {
+		t.Fatalf("DecodeWebhook() error = %v", err)
+	}
+	request := envelope.Request
+	if request.CapabilityType != CapabilityNetwork || request.Host != "api.example.com" || request.Port != 443 {
+		t.Fatalf("Request = %+v, want a network request to api.example.com:443", request)
+	}
+	if request.Protocol != "tcp" || request.SessionID != "session-1" {
+		t.Fatalf("Request = %+v, want tcp in session-1", request)
+	}
+}
+
+func TestDecodeWebhookNetworkValidation(t *testing.T) {
+	t.Parallel()
+
+	valid := networkPayload(`"host":"api.example.com"`)
+	accepted := map[string]string{
+		"empty session":    strings.Replace(valid, `"session_id":"session-1"`, `"session_id":""`, 1),
+		"IPv6 host":        networkPayload(`"host":"::1"`),
+		"longest host":     networkPayload(`"host":"` + strings.Repeat("h", maxHostBytes) + `"`),
+		"resolved IPs":     strings.Replace(valid, `"resolved_ips":[]`, `"resolved_ips":["192.0.2.1"]`, 1),
+		"unknown protocol": strings.Replace(valid, `"protocol":"tcp"`, `"protocol":"udp"`, 1),
+	}
+	for name, payload := range accepted {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := DecodeWebhook(strings.NewReader(payload)); err != nil {
+				t.Fatalf("DecodeWebhook() error = %v", err)
+			}
+		})
+	}
+
+	rejected := map[string]string{
+		"missing host":        networkPayload(`"host":""`),
+		"oversized host":      networkPayload(`"host":"` + strings.Repeat("h", maxHostBytes+1) + `"`),
+		"host with space":     networkPayload(`"host":"example.com evil"`),
+		"host with control":   networkPayload(`"host":"example.com\n"`),
+		"port zero":           strings.Replace(valid, `"port":443`, `"port":0`, 1),
+		"port too large":      strings.Replace(valid, `"port":443`, `"port":65536`, 1),
+		"missing protocol":    strings.Replace(valid, `"protocol":"tcp"`, `"protocol":""`, 1),
+		"oversized protocol":  strings.Replace(valid, `"protocol":"tcp"`, `"protocol":"`+strings.Repeat("p", maxProtocolBytes+1)+`"`, 1),
+		"blank resolved IP":   strings.Replace(valid, `"resolved_ips":[]`, `"resolved_ips":[""]`, 1),
+		"command fields":      strings.Replace(valid, `"port":443`, `"port":443,"command":"curl"`, 1),
+		"missing request ID":  strings.Replace(valid, `"request_id":"req-1"`, `"request_id":""`, 1),
+		"oversized reason":    strings.Replace(valid, `"reason":null`, `"reason":"`+strings.Repeat("r", maxMetadataBytes+1)+`"`, 1),
+		"network on commands": strings.Replace(validPayload(`"command":"gh"`), `"child_pid"`, `"host":"example.com","child_pid"`, 1),
+	}
+	for name, payload := range rejected {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := DecodeWebhook(strings.NewReader(payload)); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("error = %v, want ErrInvalidRequest", err)
+			}
+		})
+	}
+}
+
+func networkPayload(hostField string) string {
+	return `{
+		"backend":"nono-hitl",
+		"request":{
+			"capability_type":"network",
+			"request_id":"req-1",
+			` + hostField + `,
+			"port":443,
+			"protocol":"tcp",
+			"resolved_ips":[],
+			"reason":null,
+			"child_pid":0,
+			"session_id":"session-1"
+		}
+	}`
 }

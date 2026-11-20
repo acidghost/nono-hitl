@@ -1,5 +1,5 @@
 import "./Decision.css";
-import { requestID, stateLabel } from "../format";
+import { hostPort, isNetwork, requestID, requestOf, stateLabel } from "../format";
 import {
   approveByClick,
   armMilliseconds,
@@ -28,6 +28,8 @@ export function Decision({ approval, sessionLabel }: { approval: Approval; sessi
 
 function Actions({ approval, sessionLabel }: { approval: Approval; sessionLabel: string }) {
   const id = requestID(approval);
+  const request = requestOf(approval);
+  const network = isNetwork(request);
   const disabled = !canDecide(approval);
   const shortcut = (key: string) => (state.shortcutsOn ? key : undefined);
   const pressing = (scope: Scope) => state.queued?.id === id && state.queued.scope === scope;
@@ -44,7 +46,9 @@ function Actions({ approval, sessionLabel }: { approval: Approval; sessionLabel:
       ) : (
         <div class="action-row row">
           <span class="scope text-small text-muted" id="scope">
-            Session approval covers this exact argv in {sessionLabel}
+            {network
+              ? `Approval covers one connection to ${hostPort(request)}`
+              : `Session approval covers this exact argv in ${sessionLabel}`}
           </span>
           <div
             class={state.arming ? "actions row gap-small arming" : "actions row gap-small"}
@@ -70,17 +74,19 @@ function Actions({ approval, sessionLabel }: { approval: Approval; sessionLabel:
             >
               <kbd class="hint">n</kbd>Deny
             </button>
-            <button
-              class={pressing("session") ? "armed pressing" : "armed"}
-              id="approve-session"
-              type="button"
-              disabled={disabled}
-              aria-keyshortcuts={shortcut("Shift+Y")}
-              onClick={() => approveByClick(id, "session")}
-            >
-              {fill()}
-              <kbd class="hint">⇧Y</kbd>Approve for session
-            </button>
+            {!network && (
+              <button
+                class={pressing("session") ? "armed pressing" : "armed"}
+                id="approve-session"
+                type="button"
+                disabled={disabled}
+                aria-keyshortcuts={shortcut("Shift+Y")}
+                onClick={() => approveByClick(id, "session")}
+              >
+                {fill()}
+                <kbd class="hint">⇧Y</kbd>Approve for session
+              </button>
+            )}
             <button
               class={
                 pressing("once")
@@ -146,15 +152,17 @@ function NoteForm({ id, disabled }: { id: string; disabled: boolean }) {
   );
 }
 
-// The reason says who decided; for the classifier the title adds that no human was asked.
+// The reason says who decided; for the classifier or a rule of the service the title adds that
+// no human was asked.
 function Outcome({ approval }: { approval: Approval }) {
-  const title =
-    approval.resolution?.decided_by === "classifier"
-      ? "No human saw this request."
-      : approval.state !== "granted"
-        ? "This request did not receive approval."
-        : approval.resolution?.scope === "session"
-          ? "Approval granted for this nono session."
+  const title = approval.resolution?.decided_by
+    ? "No human saw this request."
+    : approval.state !== "granted"
+      ? "This request did not receive approval."
+      : approval.resolution?.scope === "session"
+        ? "Approval granted for this nono session."
+        : isNetwork(requestOf(approval))
+          ? "Approval granted for this connection."
           : "Approval granted for this invocation.";
   return (
     <div id="terminal" class="terminal row spread">

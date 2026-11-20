@@ -12,28 +12,33 @@ export type SessionRecord = {
   status?: string;
 };
 
-export type CommandRequest = {
+// capability_type says which group of fields a request carries: command or network.
+export type Request = {
   capability_type: string;
   request_id: string;
-  command: string;
-  args: string[];
-  caller: string;
-  intercept_rule: string;
   reason: string | null;
   child_pid: number;
   session_id: string;
+  command?: string;
+  args?: string[];
+  caller?: string;
+  intercept_rule?: string;
+  host?: string;
+  port?: number;
+  protocol?: string;
+  resolved_ips?: string[];
 };
 
 export type WebhookEnvelope = {
   backend: string;
-  request: CommandRequest;
+  request: Request;
 };
 
 export type Resolution = {
   state: ApprovalState;
   scope?: string;
   reason?: string;
-  // "classifier" when a decision model decided without a human.
+  // "classifier" or "service" when a decision model or a rule decided without a human.
   decided_by?: string;
   resolved_at: string;
 };

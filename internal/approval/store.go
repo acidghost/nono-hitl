@@ -19,6 +19,7 @@ var (
 	ErrAlreadyResolved = errors.New("approval request is already resolved")
 	ErrInvalidDecision = errors.New("invalid approval decision")
 	ErrGrantsDisabled  = errors.New("session approvals are disabled")
+	ErrNoSessionGrant  = errors.New("request cannot have a session approval")
 )
 
 // State describes the lifecycle of an approval.
@@ -36,8 +37,12 @@ const (
 // the same nono session.
 const ScopeSession = "session"
 
-// DecidedByClassifier marks a request a decision model decided without a human.
-const DecidedByClassifier = "classifier"
+// DecidedBy values mark requests decided without a human: by a decision
+// model, or by a rule of the service itself.
+const (
+	DecidedByClassifier = "classifier"
+	DecidedByService    = "service"
+)
 
 // Resolution is the terminal result returned to a waiting webhook request.
 type Resolution struct {
@@ -246,6 +251,22 @@ func (s *Store) Release(envelope WebhookEnvelope, timeout time.Duration) (Resolu
 // History, with its advice. A session approval that covers the request by
 // then still releases it.
 func (s *Store) Record(envelope WebhookEnvelope, decision State, reason string, advice Advice) (Resolution, error) {
+	return s.record(envelope, decision, reason, DecidedByClassifier, &advice)
+}
+
+// Reject denies a request on a rule of the service, without a human, and puts
+// it straight into History.
+func (s *Store) Reject(envelope WebhookEnvelope, reason string) (Resolution, error) {
+	return s.record(envelope, StateDenied, reason, DecidedByService, nil)
+}
+
+func (s *Store) record(
+	envelope WebhookEnvelope,
+	decision State,
+	reason string,
+	decidedBy string,
+	advice *Advice,
+) (Resolution, error) {
 	if decision != StateGranted && decision != StateDenied {
 		return Resolution{}, fmt.Errorf("%w: %q", ErrInvalidDecision, decision)
 	}
@@ -266,12 +287,12 @@ func (s *Store) Record(envelope WebhookEnvelope, decision State, reason string, 
 	resolution := Resolution{
 		State:      decision,
 		Reason:     reason,
-		DecidedBy:  DecidedByClassifier,
+		DecidedBy:  decidedBy,
 		ResolvedAt: time.Now(),
 	}
 	item.approval.State = decision
 	item.approval.Resolution = &resolution
-	item.approval.Advice = cloneAdvice(&advice)
+	item.approval.Advice = cloneAdvice(advice)
 	s.rememberLocked(item.approval)
 	s.publishLocked(Event{Kind: EventResolved, Approval: item.approval})
 	return resolution, nil
@@ -302,6 +323,9 @@ func (s *Store) DecideForSession(requestID string, reason string) (Resolution, e
 	}
 
 	request := item.approval.Envelope.Request
+	if request.CapabilityType != CapabilityCommand {
+		return Resolution{}, fmt.Errorf("%w: %s request", ErrNoSessionGrant, request.CapabilityType)
+	}
 	key := grantKey(request)
 	if len(s.grants) >= s.maxGrants {
 		s.evictOldestGrantLocked()
@@ -529,9 +553,9 @@ func (s *Store) evictOldestGrantLocked() {
 
 // grantKey identifies the exact request a session grant releases. Quoting
 // keeps field and argument boundaries unambiguous.
-func grantKey(request CommandRequest) string {
-	return fmt.Sprintf("%q %q %q %q %q",
-		request.SessionID, request.Command, request.Caller, request.InterceptRule, request.Args)
+func grantKey(request Request) string {
+	return fmt.Sprintf("%q %q %q %q %q %q",
+		request.CapabilityType, request.SessionID, request.Command, request.Caller, request.InterceptRule, request.Args)
 }
 
 // lookupSession reads a session record without holding the store lock. Any

@@ -35,6 +35,8 @@ type Server = { url: string; stateDir: string };
 type Hitl = {
   // Posts a webhook and returns once the server knows the request, without waiting for the decision.
   submit(args: string[], fields?: RequestFields): Promise<Submitted>;
+  // As submit, for a connection to host:port through nono's proxy.
+  submitNetwork(host: string, port: number, fields?: RequestFields): Promise<Submitted>;
   pendingIDs(): Promise<string[]>;
   decide(
     id: string,
@@ -147,27 +149,32 @@ export const test = base.extend<{
     const snapshot = async (): Promise<{ pending: Approval[]; recent: Approval[] }> =>
       (await request.get("/api/v1/approvals")).json();
 
+    async function post(data: (id: string) => object): Promise<Submitted> {
+      sequence++;
+      const id = `e2e-${sequence}`;
+      const decision = request
+        .post("/hooks/nono", { data: data(id) })
+        .then(async (response): Promise<Decision> => {
+          expect(response.status()).toBe(200);
+          return response.json();
+        });
+      // Tests await it later. One that fails first leaves it to reject at teardown.
+      decision.catch(() => {});
+      // Known means waiting, or already decided without a human.
+      await expect
+        .poll(async () => {
+          const { pending, recent } = await snapshot();
+          return [...requestIDs(pending), ...requestIDs(recent)];
+        })
+        .toContain(id);
+      return { id, decision };
+    }
+
     await use({
-      async submit(args, fields = {}) {
-        sequence++;
-        const id = `e2e-${sequence}`;
-        const decision = request
-          .post("/hooks/nono", { data: webhook(id, args, fields) })
-          .then(async (response): Promise<Decision> => {
-            expect(response.status()).toBe(200);
-            return response.json();
-          });
-        // Tests await it later. One that fails first leaves it to reject at teardown.
-        decision.catch(() => {});
-        // Known means waiting, or already released by a session approval.
-        await expect
-          .poll(async () => {
-            const { pending, recent } = await snapshot();
-            return [...requestIDs(pending), ...requestIDs(recent)];
-          })
-          .toContain(id);
-        return { id, decision };
-      },
+      submit: (args, fields = {}) => post((id) => webhook(id, args, fields)),
+
+      submitNetwork: (host, port, fields = {}) =>
+        post((id) => networkWebhook(id, host, port, fields)),
 
       async pendingIDs() {
         return requestIDs((await snapshot()).pending);
@@ -266,6 +273,23 @@ function webhook(id: string, args: string[], fields: RequestFields) {
   };
 }
 
+function networkWebhook(id: string, host: string, port: number, fields: RequestFields) {
+  return {
+    backend: "nono-hitl",
+    request: {
+      capability_type: "network",
+      request_id: id,
+      host,
+      port,
+      protocol: "tcp",
+      resolved_ips: [],
+      reason: fields.reason ?? null,
+      child_pid: 0,
+      session_id: fields.sessionID ?? "e2e-session",
+    },
+  };
+}
+
 // Selectors live here so markup changes touch one file.
 function dashboard(page: Page) {
   // Ends with Deny, so "Deny with note" stays out.
@@ -282,6 +306,9 @@ function dashboard(page: Page) {
   return {
     card: page.locator("#sheet"),
     chips: page.locator("#command code"),
+    destination: page.locator("#destination code"),
+    hostWarning: page.locator("#host-warning"),
+    kind: page.locator("#kind"),
     approve: page.getByRole("button", { name: "Approve once" }),
     approveSession: page.getByRole("button", { name: "Approve for session" }),
     deny,

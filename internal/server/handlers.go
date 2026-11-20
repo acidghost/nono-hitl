@@ -9,7 +9,11 @@ import (
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +28,9 @@ const (
 	// The agent reads the reason of a denial, so it holds no score to tune
 	// arguments against.
 	classifierDenial = "Denied by the command classifier."
+	// The agent must never reach the service or the decision model, whatever
+	// host name points there.
+	protectedPortDenial = "nono-hitl never approves connections to its own or Ollama's port."
 
 	maxDecisionReasonBytes = 4 * 1024
 	// Fits the most classifiers the config allows, each with the longest ask.
@@ -115,9 +122,16 @@ func (s *Server) handleWebhook(writer http.ResponseWriter, request *http.Request
 
 // submit queues the request for a human, unless a classifier entry in the deny
 // or forward mode lets the decision model decide it first. Under advise, the
-// model's answer lands on the card while the request waits.
+// model's answer lands on the card while the request waits. Network requests
+// skip the classifiers, and those to a protected port are denied outright.
 func (s *Server) submit(ctx context.Context, envelope approval.WebhookEnvelope) (approval.Resolution, error) {
 	request := envelope.Request
+	if request.CapabilityType == approval.CapabilityNetwork {
+		if slices.Contains(s.protectedPorts(), request.Port) {
+			return s.store.Reject(envelope, protectedPortDenial)
+		}
+		return s.store.Submit(ctx, envelope, s.config.DecisionTimeout)
+	}
 	entry, matched := classifier.Match(s.currentFile().Classifiers, request.Command, request.Args)
 	if !matched {
 		return s.store.Submit(ctx, envelope, s.config.DecisionTimeout)
@@ -138,7 +152,7 @@ func (s *Server) submit(ctx context.Context, envelope approval.WebhookEnvelope) 
 
 // advise asks the model under a context of its own, so the answer still
 // reaches History when a human decides first.
-func (s *Server) advise(request approval.CommandRequest, entry classifier.Entry, advice approval.Advice) {
+func (s *Server) advise(request approval.Request, entry classifier.Entry, advice approval.Advice) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ClassifierTimeout)
 	defer cancel()
 	_ = s.store.Advise(request.RequestID, s.ask(ctx, request, entry, advice))
@@ -189,7 +203,7 @@ func (s *Server) decide(
 // none.
 func (s *Server) ask(
 	ctx context.Context,
-	request approval.CommandRequest,
+	request approval.Request,
 	entry classifier.Entry,
 	advice approval.Advice,
 ) approval.Advice {
@@ -265,6 +279,8 @@ func (s *Server) handleDecision(writer http.ResponseWriter, request *http.Reques
 			writeError(writer, http.StatusNotFound, "approval was not found")
 		case errors.Is(err, approval.ErrGrantsDisabled):
 			writeError(writer, http.StatusBadRequest, "session approvals are disabled")
+		case errors.Is(err, approval.ErrNoSessionGrant):
+			writeError(writer, http.StatusBadRequest, "request cannot have a session approval")
 		default:
 			writeError(writer, http.StatusInternalServerError, "could not resolve approval")
 		}
@@ -330,6 +346,29 @@ func (s *Server) handleConfigUpdate(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	writeJSON(writer, http.StatusOK, file)
+}
+
+// protectedPorts are the ports a proxied connection could use to reach the
+// service or a local decision model. A remote Ollama is no concern: the agent
+// reaching it through an approved host doesn't come from loopback.
+func (s *Server) protectedPorts() []uint16 {
+	ports := []uint16{s.port}
+	ollama, err := url.Parse(s.currentFile().OllamaURL)
+	if err != nil || ollama.Port() == "" || !isLoopbackHost(ollama.Hostname()) {
+		return ports
+	}
+	if port, err := strconv.ParseUint(ollama.Port(), 10, 16); err == nil {
+		ports = append(ports, uint16(port))
+	}
+	return ports
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) currentFile() config.File {

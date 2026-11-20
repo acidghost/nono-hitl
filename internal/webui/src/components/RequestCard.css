@@ -81,6 +81,11 @@
     font-weight: var(--weight-bold);
   }
 
+  .host-warning {
+    border-left-color: var(--danger);
+    color: var(--danger);
+  }
+
   .advice {
     --verdict: var(--muted);
     display: grid;

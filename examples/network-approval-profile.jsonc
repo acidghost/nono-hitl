@@ -1,0 +1,31 @@
+// Asks nono-hitl about every connection to a host outside the base profile's allowlist.
+// The approval backends turn on strict proxy filtering, even with an empty allowlist.
+{
+  "$schema": "https://github.com/nolabs-ai/nono/raw/refs/heads/main/crates/nono-cli/data/nono-profile.schema.json",
+  "meta": {
+    "name": "network-approval"
+  },
+  "network": {
+    // nono-hitl denies its own port and Ollama's whatever the host; these refuse the literal
+    // loopback forms before any prompt. Names that resolve to loopback still reach nono-hitl.
+    "deny_domain": [
+      "127.0.0.1:8765",
+      "localhost:8765",
+      "[::1]:8765",
+      "127.0.0.1:11434",
+      "localhost:11434",
+      "[::1]:11434"
+    ],
+    "approval_backends": {
+      "nono-hitl": {
+        "type": "webhook",
+        "url": "http://127.0.0.1:8765/hooks/nono",
+        // Host approvals take their timeout from here, not from approval_defaults.
+        "timeout_secs": 60
+      }
+    },
+    "approval_defaults": {
+      "backend": "nono-hitl"
+    }
+  }
+}

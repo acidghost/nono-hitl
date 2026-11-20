@@ -208,9 +208,9 @@ func TestWebhookRejectsMalformedOversizedAndUnsupportedRequests(t *testing.T) {
 		{
 			name: "unsupported capability",
 			body: strings.Replace(
-				validWebhookBody(t, "req-network", "curl"),
+				validWebhookBody(t, "req-endpoint", "curl"),
 				`"capability_type":"command"`,
-				`"capability_type":"network"`,
+				`"capability_type":"endpoint"`,
 				1,
 			),
 			contentType: "application/json",
@@ -464,7 +464,7 @@ func validWebhookBody(t *testing.T, requestID, command string) string {
 	t.Helper()
 	envelope := approval.WebhookEnvelope{
 		Backend: "nono-hitl",
-		Request: approval.CommandRequest{
+		Request: approval.Request{
 			CapabilityType: approval.CapabilityCommand,
 			RequestID:      requestID,
 			Command:        command,
@@ -637,4 +637,101 @@ func waitForStreamContent(t *testing.T, response *streamRecorder, fragments ...s
 			t.Fatalf("stream content = %q, missing %q", content, fragments)
 		}
 	}
+}
+
+func TestNetworkWebhookWaitsForAOneShotDecision(t *testing.T) {
+	t.Parallel()
+
+	service, store := newTestServer(t, nil)
+	webhookDone := submitWebhook(service, networkWebhookBody(t, "req-net", "api.example.com", 443, ""))
+	waitForPending(t, store)
+
+	request := store.Pending()[0].Envelope.Request
+	if request.CapabilityType != approval.CapabilityNetwork || request.Host != "api.example.com" {
+		t.Fatalf("pending request = %+v, want a network request", request)
+	}
+	session := performDecision(service, "req-net", `{"decision":"granted","scope":"session"}`, service.origin)
+	if session.Code != http.StatusBadRequest {
+		t.Fatalf("session decision status = %d, want %d", session.Code, http.StatusBadRequest)
+	}
+	decision := performDecision(service, "req-net", `{"decision":"denied","reason":"use the mirror"}`, service.origin)
+	if decision.Code != http.StatusOK {
+		t.Fatalf("decision status = %d, want %d: %s", decision.Code, http.StatusOK, decision.Body.String())
+	}
+
+	webhook := awaitHTTPResponse(t, webhookDone)
+	var response decisionResponse
+	decodeResponse(t, webhook.Body, &response)
+	if response.Decision != "denied" || response.Reason != "use the mirror" {
+		t.Fatalf("webhook response = %+v, want a denial with the note", response)
+	}
+}
+
+func TestNetworkWebhookDeniesProtectedPortsWithoutAHuman(t *testing.T) {
+	t.Parallel()
+
+	service, store := newTestServer(t, func(config *Config) {
+		config.File.OllamaURL = "http://localhost:11999"
+	})
+	tests := map[string]struct {
+		host string
+		port uint16
+	}{
+		"own port on loopback":     {host: "127.0.0.1", port: 8765},
+		"own port on another name": {host: "localtest.me", port: 8765},
+		"local Ollama port":        {host: "[::1]", port: 11999},
+	}
+	// One server for every case, so the store must end up with no pending requests.
+	for name, test := range tests {
+		response := performRequest(service, http.MethodPost, "/hooks/nono",
+			networkWebhookBody(t, "req-"+name, test.host, test.port, "session-1"),
+			map[string]string{"Content-Type": "application/json"})
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want %d", name, response.Code, http.StatusOK)
+		}
+		var decision decisionResponse
+		decodeResponse(t, response.Body, &decision)
+		if decision.Decision != "denied" || decision.Reason != protectedPortDenial {
+			t.Fatalf("%s: webhook response = %+v, want the protected port denial", name, decision)
+		}
+	}
+	if pending := store.Pending(); len(pending) != 0 {
+		t.Fatalf("Pending() = %+v, want none", pending)
+	}
+	for _, recent := range store.Recent() {
+		if recent.Resolution.DecidedBy != approval.DecidedByService {
+			t.Fatalf("Recent() entry = %+v, want decided by the service", recent.Resolution)
+		}
+	}
+}
+
+func TestProtectedPortsIgnoreARemoteOllama(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestServer(t, func(config *Config) {
+		config.File.OllamaURL = "https://ollama.example.com:8443"
+	})
+	if got := service.protectedPorts(); len(got) != 1 || got[0] != 8765 {
+		t.Fatalf("protectedPorts() = %v, want only the listen port", got)
+	}
+}
+
+func networkWebhookBody(t *testing.T, requestID, host string, port uint16, sessionID string) string {
+	t.Helper()
+	envelope := approval.WebhookEnvelope{
+		Backend: "nono-hitl",
+		Request: approval.Request{
+			CapabilityType: approval.CapabilityNetwork,
+			RequestID:      requestID,
+			Host:           host,
+			Port:           port,
+			Protocol:       "tcp",
+			SessionID:      sessionID,
+		},
+	}
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return string(body)
 }
