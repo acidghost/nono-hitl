@@ -8,7 +8,7 @@
         "preact": "11.2.0",
       },
       "devDependencies": {
-        "@playwright/test": "1.65.0",
+        "@playwright/test": "1.65.1",
         "@types/bun": "1.4.4",
         "@types/node": "24.19.2",
         "typescript": "7.0.2",
@@ -16,7 +16,7 @@
     },
   },
   "packages": {
-    "@playwright/test": ["@playwright/test@1.65.0", "", { "dependencies": { "playwright": "1.65.0" }, "bin": { "playwright": "cli.js" } }, "sha512-iGURLGuKDLakSEl7Pgfv8h7f+XLT+V861Wfhz0zlEl5nyFuKUopdkFBPKqTllTUp06aOwPuH8iuUEb3yp3MpbQ=="],
+    "@playwright/test": ["@playwright/test@1.65.1", "", { "dependencies": { "playwright": "1.65.1" }, "bin": { "playwright": "cli.js" } }, "sha512-y+NCIRm2LvY4slUVWvGh1nujJ8RF/hEisIsq2mtUPgdQC4L701bq5hZGMhrpeXjACvwvO9tj5dJqhvM6TP9lbw=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
@@ -64,9 +64,9 @@
 
     "bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
-    "playwright": ["playwright@1.65.0", "", { "dependencies": { "playwright-core": "1.65.0" }, "bin": { "playwright": "cli.js" } }, "sha512-F3AMWcR44qMBt4kq+6Kb6mX7bjGXshktKFOPULd7reED6ZJWevjbNRqysP7q+AATE9kdPEZBibex1BYsvpVoeA=="],
+    "playwright": ["playwright@1.65.1", "", { "dependencies": { "playwright-core": "1.65.1" }, "bin": { "playwright": "cli.js" } }, "sha512-vJ1FuoOrNwOKHUIVEvSt3jT1L+wjjDpwhwIstKtfvTh8XIG4FG4bIFuvNdMxi81LGfAhUgUZleVFaOLY4RIUUw=="],
 
-    "playwright-core": ["playwright-core@1.65.0", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-vNSKgH6YqtN7cdT/L334zo0a+YwkrpicyrHJlWWPIm/Q+Nn2SWInil01oT0mbu96U4GgoRtCYQD9CzJQgju+lA=="],
+    "playwright-core": ["playwright-core@1.65.1", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-hqPpz7blSMPxWVdoeE1yiBSzXsKiVOd2k+kjCvmUywD2GPO2Dd9HfcWnq9NN0GHbNZDFgZ9JfBFr+X5/BLo0qw=="],
 
     "preact": ["preact@11.2.0", "", { "peerDependencies": { "preact-render-to-string": ">=6.7.0" }, "optionalPeers": ["preact-render-to-string"] }, "sha512-/HfHI/7N84e6GrWBJ3J280z3mLaRJiDcSvj/A+y/4AbLnND/1UlGHe1sR6oYuTGwId0nP7dqDU9OnLxMPZ7xBg=="],
 
