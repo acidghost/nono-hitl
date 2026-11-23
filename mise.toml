@@ -1,6 +1,6 @@
 [tools]
 biome = "2.6.6"
 bun = "1.4.4"
-go = "1.27.3"
+go = "1.27.4"
 golangci-lint = "2.15.0"
 just = "1.59.0"
