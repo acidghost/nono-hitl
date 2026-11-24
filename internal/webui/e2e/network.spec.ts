@@ -72,6 +72,8 @@ test("a loopback host is flagged and its denial stays in History", async ({ page
     reason: "Denied in browser: no local databases",
   });
 
+  // The webhook can return before the browser removes the focused note field.
+  await expect(ui.note).toBeHidden();
   await page.keyboard.press("h");
   await expect(ui.history.first()).toContainText("net [::1]:5432");
   await ui.history.first().click();
