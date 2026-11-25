@@ -36,6 +36,28 @@ jobs:
       - name: Smoke test
         run: just run --help
 
+      - name: Check GoReleaser configuration
+        run: just release-check
+
+      - name: Build and smoke-test release archives
+        shell: bash
+        run: |
+          just release-snapshot
+          (cd dist && sha256sum -c SHA256SUMS)
+          for target in darwin_arm64 linux_amd64 linux_arm64; do
+            archives=(dist/nono-hitl_*_"$target".tar.gz)
+            test "${#archives[@]}" -eq 1 && test -f "${archives[0]}" || exit 1
+          done
+          tar -xzf dist/nono-hitl_*_linux_amd64.tar.gz -C dist nono-hitl
+          dist/nono-hitl --help
+          dist/nono-hitl version | grep -Fx "Commit:  $(git rev-parse HEAD)"
+
+      - name: Build and smoke-test image without pushing
+        shell: bash
+        run: |
+          docker build --platform linux/amd64 --tag nono-hitl:ci .
+          test "$(docker run --rm nono-hitl:ci version)" = "$(dist/nono-hitl version)"
+
       - name: End-to-end tests
         run: just e2e
 

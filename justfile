@@ -1,48 +1,32 @@
 program := 'nono-hitl'
 
-version := 'SNAPSHOT-'+`git describe --tags --always --dirty 2>/dev/null || printf 'unknown'`
-commit_sha := `(git rev-parse HEAD 2>/dev/null || printf 'unknown') | tr -d '\n'`
-build_time := `date -u '+%Y-%m-%d_%H:%M:%S'`
-
 container_engine := 'docker'
 container_registry := 'ghcr.io'
 container_image := container_registry + '/acidghost/' + program
 
 webui_dir := 'internal/webui'
 
-ldflags := '-s -w -X main.buildVersion='+version \
-        +' -X main.buildCommit='+commit_sha \
-        +' -X main.buildDate='+build_time
-
 install_prefix := `go env GOBIN`
 
 goos := if os() == 'macos' { 'darwin' } else { os() }
 goarch := if arch() == 'aarch64' { 'arm64' } else if arch() == 'x86_64' { 'amd64' } else { arch() }
-host_binary := justfile_directory() / 'build' / program + '-' + goos + '-' + goarch
+local_binary := 'dist' / program
+host_binary := justfile_directory() / local_binary
 
 alias b := build
 alias r := run
 
-build-all: (build 'darwin' 'arm64') (build 'linux' 'arm64') (build 'linux' 'amd64')
+build-all:
+    goreleaser build --snapshot --clean
 
-build-image platform=goarch:
-    {{container_engine}} build \
-        --platform 'linux/{{platform}}' \
-        --build-arg BUILD_VERSION='{{version}}' \
-        --build-arg BUILD_COMMIT='{{commit_sha}}' \
-        -t '{{container_image}}' .
+build-image platform=goarch: (build 'linux' platform)
+    {{container_engine}} build --platform 'linux/{{platform}}' -t '{{container_image}}' .
 
-build os=goos arch=goarch: build-dir web
-    CGO_ENABLED=0 GOOS={{os}} GOARCH={{arch}} \
-        go build \
-            -ldflags '{{ldflags}}' \
-            -o build/{{program}}-{{os}}-{{arch}}
-
-build-dir:
-    mkdir -p build
+build os=goos arch=goarch:
+    GOOS={{os}} GOARCH={{arch}} goreleaser build --snapshot --single-target --clean --output '{{local_binary}}'
 
 run *args: build
-    ./build/{{program}}-{{goos}}-{{goarch}} {{args}}
+    './{{local_binary}}' {{args}}
 
 # serves the UI from disk while bun rebuilds it on every change; refresh the browser to see it
 dev *args: web
@@ -97,11 +81,20 @@ screenshots *args: _browser build typecheck
 
 check: lint typecheck web-test vet test build
 
+release-check:
+    goreleaser check
+
+release-snapshot:
+    goreleaser release --snapshot --clean --skip=publish
+
+release:
+    goreleaser release --clean
+
 install: build
-    cp -v './build/{{program}}-{{goos}}-{{goarch}}' "{{install_prefix}}/{{program}}"
+    cp -v '{{local_binary}}' "{{install_prefix}}/{{program}}"
 
 clean:
-    rm -rf build {{webui_dir}}/dist
+    rm -rf dist {{webui_dir}}/dist
 
 help:
     @just --list

@@ -31,18 +31,22 @@ See [Threat model](#threat-model) before using the service with an agent.
 
 ## Quick start
 
-Build and run the service from a trusted host terminal. The build needs Go, bun
-and just; `mise install` sets up the versions pinned in
-[`mise.toml`](mise.toml).
+Download `nono-hitl_<version>_<os>_<arch>.tar.gz` and `SHA256SUMS` from
+[GitHub Releases](https://github.com/acidghost/nono-hitl/releases). Choose
+`darwin_arm64` for Apple Silicon or `linux_amd64` / `linux_arm64` for Linux.
+Verify the archive before extracting it (replace the example filename with the
+one you downloaded):
 
 ```sh
-just install
-nono-hitl serve --open
+archive=nono-hitl_0.1.0_darwin_arm64.tar.gz
+grep -F "  $archive" SHA256SUMS | shasum -a 256 -c
+gh attestation verify "$archive" --repo acidghost/nono-hitl
+tar -xzf "$archive"
+./nono-hitl serve --open
 ```
 
-If the Go bin directory is not already on `PATH`, add the first entry from
-`go env GOPATH` followed by `/bin`. `just install` honors `go env GOBIN` when it
-is set and otherwise installs there.
+Run the service from a trusted host terminal. To build from source instead, run
+`mise install` and `just build`, then use `./dist/nono-hitl`.
 
 Check the service:
 
@@ -528,11 +532,28 @@ CORS checks.
 
 ### Running in Docker
 
-The binary can be built as a static Linux image with `just build-image`, but its
-mandatory literal-loopback binding is inside the container network namespace.
-Normal port publishing cannot expose that listener. For this local desktop trust
-boundary, run the binary directly on the host; do not weaken the listener
-validation for container convenience.
+The `linux/amd64` release image contains the same binary as the Linux AMD64
+archive. Pull it by Git tag (there is no `latest`) or build a local image with
+`just build-image`:
+
+```sh
+docker pull ghcr.io/acidghost/nono-hitl:v0.1.0
+```
+
+To verify the signature, compare the digest printed by `docker pull` to the
+one in the tag's release workflow summary. Replace `DIGEST` with that full
+`sha256:...` value and use the matching tag in the certificate identity:
+
+```sh
+cosign verify ghcr.io/acidghost/nono-hitl@DIGEST \
+  --certificate-identity https://github.com/acidghost/nono-hitl/.github/workflows/release.yaml@refs/tags/v0.1.0 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The mandatory literal-loopback binding is inside the container network
+namespace. Normal port publishing cannot expose that listener. For this local
+desktop trust boundary, run the binary directly on the host; do not weaken the
+listener validation for container convenience.
 
 ## Development
 
@@ -558,12 +579,15 @@ Run the normal CI-equivalent checks with:
 just check
 ```
 
-`build-all` cross-compiles static Darwin ARM64 and Linux ARM64/AMD64 binaries.
+GoReleaser builds the binaries into `dist/`. `just build` writes the selected
+target to `dist/nono-hitl` (host by default); `just build linux amd64` targets
+Linux AMD64. `just build-all` cross-compiles static Darwin ARM64 and Linux
+ARM64/AMD64 binaries.
 
-The dashboard is Preact components written in TSX, in `internal/webui/src`. bun
-bundles them into `internal/webui/dist`, which the binary embeds, so every
-recipe that compiles Go runs `just web` first. The page loads nothing from
-outside the binary. `just web-test` runs the unit tests for its pure helpers.
+The dashboard is Preact components written in TSX, in `internal/webui/src`. Bun
+bundles them into `internal/webui/dist`, which the binary embeds. GoReleaser
+runs `just web` before building. The page loads nothing from outside the binary.
+`just web-test` runs the unit tests for its pure helpers.
 
 `just dev` runs the server from source with the dashboard read from disk, while
 bun rebuilds it on every change. Refresh the browser to see an edit; pending
@@ -584,6 +608,24 @@ commit with `just screenshots --update-snapshots`.
 
 To try the dashboard by hand, run `just run serve -config examples/config.json`
 and send requests with [`send-request.sh`](examples/send-request.sh).
+
+## Cutting a release
+
+Run `just release-check` and `just release-snapshot` to validate the release
+configuration and build archives in `dist/` without publishing. Once CI passes
+on the `main` commit you want to release, push an annotated version tag:
+
+```sh
+git tag -a v0.1.0 -m 'v0.1.0'
+git push origin v0.1.0
+```
+
+`vX.Y.Z` tags publish stable releases; `vX.Y.Z-rc.N` tags publish prereleases.
+The workflow publishes attested archives to GitHub Releases, then packages the
+Linux AMD64 binary into a signed GHCR image with an SBOM and provenance. On the
+first release, check the GHCR package visibility and make it public for
+unauthenticated pulls. If a job fails, check what was published before rerunning
+the failed job. Do not move a published tag.
 
 ## License
 
