@@ -33,6 +33,7 @@ go.work.sum
 
 # Build output
 /build
+/dist/
 
 # Web UI
 node_modules/

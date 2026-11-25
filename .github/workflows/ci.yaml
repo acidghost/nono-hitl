@@ -36,6 +36,19 @@ jobs:
       - name: Smoke test
         run: just run --help
 
+      - name: Check GoReleaser configuration
+        run: just release-check
+
+      - name: Build release snapshot
+        run: just release-snapshot
+
+      - name: Build and smoke-test image without pushing
+        shell: bash
+        run: |
+          tar -xzf dist/nono-hitl_*_linux_amd64.tar.gz -C dist nono-hitl
+          docker build --platform linux/amd64 --tag nono-hitl:ci .
+          docker run --rm nono-hitl:ci version
+
       - name: End-to-end tests
         run: just e2e
 
